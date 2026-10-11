@@ -1,0 +1,20 @@
+.course-table{container-type:inline-size}
+.course-table table{min-width:0}
+.course-table th{white-space:normal;min-width:65px}
+.course-table td input,.course-table td select{width:100%;min-width:65px;max-width:none}
+.course-table td input[type=checkbox]{width:16px;min-width:16px}
+#save-status{font-size:12px;color:var(--muted)}
+@container(max-width:800px){
+ .course-table table,.course-table tbody{display:block;width:100%}
+ .course-table thead{display:none}
+ .course-table tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;background:var(--surface2);border:1px solid var(--line);padding:16px;border-radius:10px;margin:14px 0}
+ .course-table td{display:block;min-width:0;padding:0;border:0}
+ .course-table td:first-child{grid-column:1/-1}
+ .course-table td::before{content:attr(data-label);display:block;font-size:12px;color:var(--muted);margin-bottom:6px;overflow-wrap:anywhere}
+ .course-table td:last-child{grid-column:1/-1;text-align:right}
+ .course-table td:last-child::before{display:none}
+ .course-table .field{gap:0}
+}
+@container(max-width:400px){
+ .course-table tr{grid-template-columns:minmax(0,1fr)}
+}

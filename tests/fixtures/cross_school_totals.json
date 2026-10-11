@@ -1,0 +1,230 @@
+[
+  {
+    "source_url": "https://gggl.gduf.edu.cn/info/1143/2890.htm",
+    "policy": {
+      "name": "广东金融学院：五项加权汇总",
+      "inputs": [
+        {
+          "id": "moral",
+          "type": "number",
+          "min": 0,
+          "max": 100
+        },
+        {
+          "id": "study",
+          "type": "number",
+          "min": 0,
+          "max": 100
+        },
+        {
+          "id": "sport",
+          "type": "number",
+          "min": 0,
+          "max": 100
+        },
+        {
+          "id": "art",
+          "type": "number",
+          "min": 0,
+          "max": 100
+        },
+        {
+          "id": "labor",
+          "type": "number",
+          "min": 0,
+          "max": 100
+        }
+      ],
+      "tables": [],
+      "item_rules": [],
+      "formulas": [
+        {
+          "id": "result",
+          "label": "汇总分",
+          "expression": "moral*.2+study*.6+sport*.1+art*.05+labor*.05",
+          "citations": [
+            {
+              "document_id": "5b2dc6d4107f113455d9ea3f",
+              "unit": 1,
+              "quote": "各部分所占百分比分别为20%、60%、10%、5%、5%"
+            }
+          ]
+        }
+      ],
+      "total": "result",
+      "scope": "仅验证原文总分结构；子项分数为独立验收输入，不代表完整细则解析"
+    },
+    "student": {
+      "inputs": {
+        "moral": 80,
+        "study": 80,
+        "sport": 80,
+        "art": 80,
+        "labor": 80
+      },
+      "tables": {},
+      "items": []
+    },
+    "expected": 80,
+    "actual": 80.0
+  },
+  {
+    "source_url": "https://www.hnit.edu.cn/wgyxy/info/1028/6878.htm",
+    "policy": {
+      "name": "湖南工学院语言与文化学院：课程与五项实践加权，再加附加分",
+      "inputs": [
+        {
+          "id": "courses",
+          "type": "number",
+          "min": 0,
+          "max": 100
+        },
+        {
+          "id": "moral_practice",
+          "type": "number",
+          "min": 0,
+          "max": 100
+        },
+        {
+          "id": "study_practice",
+          "type": "number",
+          "min": 0,
+          "max": 100
+        },
+        {
+          "id": "sport_practice",
+          "type": "number",
+          "min": 0,
+          "max": 100
+        },
+        {
+          "id": "art_practice",
+          "type": "number",
+          "min": 0,
+          "max": 100
+        },
+        {
+          "id": "labor_practice",
+          "type": "number",
+          "min": 0,
+          "max": 100
+        },
+        {
+          "id": "bonus",
+          "type": "number",
+          "min": 0,
+          "max": 100
+        }
+      ],
+      "tables": [],
+      "item_rules": [],
+      "formulas": [
+        {
+          "id": "result",
+          "label": "汇总分",
+          "expression": "courses*.6+moral_practice*.15+study_practice*.1+sport_practice*.05+art_practice*.05+labor_practice*.05+bonus",
+          "citations": [
+            {
+              "document_id": "11517998fa85f2b8c1bca523",
+              "unit": 1,
+              "quote": "综合素质测评分\n=\n“五育”课程成绩×"
+            }
+          ]
+        }
+      ],
+      "total": "result",
+      "scope": "仅验证原文总分结构；子项分数为独立验收输入，不代表完整细则解析"
+    },
+    "student": {
+      "inputs": {
+        "courses": 80,
+        "moral_practice": 80,
+        "study_practice": 80,
+        "sport_practice": 80,
+        "art_practice": 80,
+        "labor_practice": 80,
+        "bonus": 3
+      },
+      "tables": {},
+      "items": []
+    },
+    "expected": 83,
+    "actual": 83.0
+  },
+  {
+    "source_url": "https://hsart.hbpu.edu.cn/info/1111/5143.htm",
+    "policy": {
+      "name": "湖北理工学院艺术学院：已折算的各项分数直接相加",
+      "inputs": [
+        {
+          "id": "moral",
+          "type": "number",
+          "min": 0,
+          "max": 20
+        },
+        {
+          "id": "study",
+          "type": "number",
+          "min": 0,
+          "max": 50
+        },
+        {
+          "id": "sport",
+          "type": "number",
+          "min": 0,
+          "max": 10
+        },
+        {
+          "id": "art",
+          "type": "number",
+          "min": 0,
+          "max": 10
+        },
+        {
+          "id": "labor",
+          "type": "number",
+          "min": 0,
+          "max": 10
+        },
+        {
+          "id": "bonus",
+          "type": "number",
+          "min": 0,
+          "max": 15
+        }
+      ],
+      "tables": [],
+      "item_rules": [],
+      "formulas": [
+        {
+          "id": "result",
+          "label": "汇总分",
+          "expression": "moral+study+sport+art+labor+bonus",
+          "citations": [
+            {
+              "document_id": "7bc1c727b8194ba236f15f03",
+              "unit": 1,
+              "quote": "该项满分20 分，德育测评成绩"
+            }
+          ]
+        }
+      ],
+      "total": "result",
+      "scope": "仅验证原文总分结构；子项分数为独立验收输入，不代表完整细则解析"
+    },
+    "student": {
+      "inputs": {
+        "moral": 16,
+        "study": 40,
+        "sport": 8,
+        "art": 8,
+        "labor": 8,
+        "bonus": 3
+      },
+      "tables": {},
+      "items": []
+    },
+    "expected": 83,
+    "actual": 83.0
+  }
+]
