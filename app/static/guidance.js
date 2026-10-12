@@ -53,7 +53,7 @@ function guidanceHomeView() {
   const result = calcResult && (!calcResult.policy_id || calcResult.policy_id === p.id) && (!calcResult.profile_id || calcResult.profile_id === u?.id) && (!calcResult.policy_version || calcResult.policy_version === p.version) ? calcResult : null;
   const usable = Boolean(u && state.hasData && result && p.state === 'active' && !state.missing.length);
   const gains = (result?.planned_gains || []).filter(x => !x.error && Number.isFinite(Number(x.gain))).sort((a, b) => Number(b.gain) - Number(a.gain));
-  const plans = (S.plans || []).filter(x => !x.policy_id || x.policy_id === p.id).filter(x => !x.date || x.date >= guidanceToday()).sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999')).slice(0, 3);
+  const plans = (S.plans || []).filter(x => !x.policy_id || x.policy_id === p.id).filter(x => !x.completed && (!x.profile_id || x.profile_id === profileId)).filter(x => !x.date || x.date >= guidanceToday()).sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999')).slice(0, 3);
   let nextTitle = '添加成绩单或证明，看看你现在有多少分';
   let nextDetail = '上传材料后核对提取结果，也可以直接填写。';
   if (u && state.hasData) {
@@ -78,7 +78,7 @@ function guidanceHomeView() {
 function guidanceRulesView() {
   const p = P();
   if (!p) return guidanceHomeView();
-  return heading('问细则，找依据', esc(p.name), btn('去整理我的材料', 'start-score')) + `
+  return heading('问细则，找依据', esc(p.name), btn('对照原文核对规则', 'wf-review') + btn('去整理我的材料', 'start-score')) + `
     ${p.state !== 'active' ? '<div class="notice"><b>这是自动整理的规则草稿，尚未核验。</b> 解读与计分条件需要对照引用原文；核验并启用后才能计算。</div>' : ''}
     <section class="card guidance-question"><h2>你想确认什么？</h2><div class="question-form"><textarea id="question" aria-label="向规则助手提问" placeholder="例如：我的这项比赛能加分吗？需要准备哪些证明？"></textarea>${btn('查细则', 'ask', '', 'primary')}</div><div class="actions guidance-quick">${['帮我找容易漏报的加分项', '成果证明需要满足哪些条件？', '同一比赛拿了多个奖，怎么计分？'].map(q => btn(esc(q), 'quick-ask', `data-question="${esc(q)}"`, 'subtle')).join('')}</div>${answer ? `<div class="answer-block prose">${esc(answer.answer)}</div><div class="citations">${(answer.document_ids || []).map(id => btn(esc(docName(id).slice(0, 28)), 'source', `data-doc="${esc(id)}" data-unit="1"`, 'citation')).join('')}</div>` : ''}</section>
     <section class="card"><h2>这份细则怎么影响你</h2><p class="guidance-rule-summary">${esc(p.summary || '暂未生成概览，可以直接提问并查看原文依据。')}</p></section>
@@ -93,6 +93,10 @@ function guidanceToday() {
 }
 
 function guidanceNoticeTiming(notice) {
+  if (notice.timing) {
+    const t = notice.timing, dates = t.dates, upcoming = dates.filter(d => d.date >= guidanceToday());
+    return {dates, upcoming, expired: t.status === 'closed' || (dates.length > 0 && !upcoming.length), sort: upcoming[0]?.date || '9999'};
+  }
   const today = guidanceToday();
   const dates = (notice.analysis?.dates || []).filter(d => {
     if (!d.verified || !/^\d{4}-\d{2}-\d{2}$/.test(d.date || '')) return false;
@@ -119,33 +123,10 @@ function guidanceOpportunityView() {
   const current = records.filter(x => !x.timing.expired), old = records.filter(x => x.timing.expired);
   const r = (S.research || []).find(x => x.policy_id === p.id);
   return heading('找值得参加的项目', '先看公告条件和时间，再结合自己的记录判断收益。', btn('查找最新公告', 'research-all', '', 'primary')) + `
-    ${records.length ? `<section class="card guidance-filter"><label for="guidance-notice-filter">在已收集公告中查找</label><input id="guidance-notice-filter" type="search" placeholder="输入比赛、认证或活动名称"><small id="guidance-filter-count" aria-live="polite">${records.length} 份公告；旧信息在下方折叠区。</small></section>` : ''}
-    ${current.length ? `<div class="opportunity-grid guidance-current-notices">${current.map(x => guidanceNoticeCard(x.n, x.timing)).join('')}</div>` : `<section class="card empty"><strong>${old.length ? '暂时没有新的时间节点' : '还没有收集到公告'}</strong><p>查找细则认可的赛事和认证，也可以直接粘贴官方公告链接。</p>${btn('查找最新公告', 'research-all', '', 'primary')}</section>`}
+    ${workflowFilters()}<div id="wf-calendar"></div>
+    ${current.length ? `<div class="opportunity-grid guidance-current-notices">${current.map(x => workflowNoticeCard(x.n, x.timing)).join('')}</div>` : `<section class="card empty"><strong>${old.length ? '暂时没有新的时间节点' : '还没有收集到公告'}</strong><p>查找细则认可的赛事和认证，也可以直接粘贴官方公告链接。</p>${btn('查找最新公告', 'research-all', '', 'primary')}</section>`}
     <p id="guidance-filter-empty" class="notice" hidden>没有匹配的已收集公告，可以在下方搜索新的公告。</p>
-    ${old.length ? `<details class="card guidance-old-notices section-gap"><summary>查看已过时间节点的公告（${old.length}）</summary><p class="muted">保留用于查材料与计分要求；新一届安排请查看新的官方通知。</p><div class="opportunity-grid">${old.map(x => guidanceNoticeCard(x.n, x.timing)).join('')}</div></details>` : ''}
+    ${old.length ? `<details class="card guidance-old-notices section-gap"><summary>查看已过时间节点的公告（${old.length}）</summary><p class="muted">保留用于查材料与计分要求；新一届安排请查看新的官方通知。</p><div class="opportunity-grid">${old.map(x => workflowNoticeCard(x.n, x.timing)).join('')}</div></details>` : ''}
     <section class="card section-gap"><h2>没有找到想参加的项目？</h2><label for="search-query" class="guidance-input-label">搜索新的公告</label><div class="search-bar"><input id="search-query" placeholder="例如：2026 程序设计竞赛 报名">${btn('搜索公告', 'research-query')}</div><label for="notice-url" class="guidance-input-label">已有官方公告链接</label><div class="search-bar"><input id="notice-url" type="url" placeholder="粘贴公告链接，读取报名条件和附件">${btn('读取公告', 'import-notice')}</div></section>
     <details class="card guidance-maintenance"><summary>认可项目、更新情况与检索记录</summary><div class="guidance-maintenance-body"><p class="muted">自动更新：${S.settings?.auto_research ? `本地服务运行时每 ${esc(S.settings.refresh_hours)} 小时检查` : '已关闭'}。这里保留来源和失败记录，方便需要时核查。</p><h3>细则列出的项目</h3><div class="scroll">${(p.opportunities || []).map(o => `<div class="rule-row"><div class="rule-heading"><b>${esc(o.name)}</b>${btn('找公告', 'research-one', `data-query="${esc(new Date().getFullYear() + ' ' + o.name + ' 报名 通知')}"`)}</div><p class="muted">${esc(o.eligibility || o.category || '')}</p></div>`).join('') || '<p class="muted">暂无明确项目清单。</p>'}</div>${r ? `<h3 class="section-gap">最近一次检索 · ${dateLabel(r.searched_at)}</h3><div class="coverage"><div><b>${esc(r.coverage?.queries || 0)}</b><small>检索词</small></div><div><b>${esc(r.coverage?.official_hits || 0)}</b><small>官方域名结果</small></div><div><b>${esc(r.coverage?.downloaded || 0)}</b><small>新收集公告</small></div><div><b>${esc(r.coverage?.failed || 0)}</b><small>失败</small></div></div><details><summary>查看原始检索与待处理来源</summary><div class="scroll">${(r.queries || []).map(q => `<div class="rule-row"><b>${esc(q.query)}</b><p class="muted">${q.status === 'failed' ? '失败：' + esc(q.error) : (q.results || []).length + ' 条结果'}</p></div>`).join('')}${(r.leads || []).map(l => `<div class="rule-row"><a href="${safeUrl(l.url)}" target="_blank" rel="noopener">${esc(l.title)}</a> <span class="tag">${l.official_domain ? '官方域名匹配' : '域名待核对'}</span>${l.error ? `<p class="muted">${esc(l.error)}</p>` : ''}${!l.notice_id && l.official_domain ? btn('读取并分析', 'collect-url', `data-url="${esc(l.url)}"`) : ''}</div>`).join('')}</div></details>` : '<p class="muted">还没有检索记录。</p>'}</div></details>`;
 }
-
-document.addEventListener('input', event => {
-  if (event.target.id !== 'guidance-notice-filter') return;
-  const query = event.target.value.trim().toLocaleLowerCase();
-  let visible = 0, oldVisible = 0;
-  for (const card of document.querySelectorAll('[data-notice-card]')) {
-    card.hidden = !card.dataset.filterText.includes(query);
-    if (!card.hidden) {
-      visible += 1;
-      if (card.closest('.guidance-old-notices')) oldVisible += 1;
-    }
-  }
-  const counter = document.getElementById('guidance-filter-count');
-  if (counter) counter.textContent = `${visible} 份匹配公告${oldVisible ? `，其中 ${oldVisible} 份已过已知时间节点` : ''}`;
-  const oldSection = document.querySelector('.guidance-old-notices');
-  if (oldSection) {
-    oldSection.hidden = Boolean(query) && !oldVisible;
-    if (query && oldVisible) oldSection.open = true;
-    if (!query) oldSection.open = false;
-  }
-  const emptyState = document.getElementById('guidance-filter-empty');
-  if (emptyState) emptyState.hidden = visible > 0;
-});

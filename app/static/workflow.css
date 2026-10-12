@@ -1,0 +1,15 @@
+.wf-tags,.wf-calendar-summary{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+.wf-recognition small,.wf-calendar-row small{display:block;margin-top:4px;color:var(--muted)}
+.wf-calendar-summary>span{padding:8px 12px;border:1px solid var(--line);border-radius:8px}
+.wf-calendar-row{display:flex;align-items:center;gap:14px;padding:12px 0;border-top:1px solid var(--line)}
+.wf-calendar-row>div{flex:1;min-width:0}.wf-calendar-row time{white-space:nowrap}
+.wf-plan-list{display:grid;gap:16px}.wf-complete{opacity:.7}
+.wf-checklist{display:grid;gap:12px;margin:16px 0}.wf-checklist label{display:flex;align-items:flex-start;gap:10px}.wf-checklist input{flex:0 0 auto;margin-top:4px}.wf-checklist input:checked+span{text-decoration:line-through;color:var(--muted)}
+.wf-check-edit{display:flex;gap:8px;margin:8px 0}.wf-check-edit input{flex:1;min-width:0}
+.wf-review-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}.wf-review-grid>section{min-width:0}.wf-source{max-height:60vh;overflow:auto;background:var(--bg);padding:12px;border-radius:8px}.wf-source pre{white-space:pre-wrap;overflow-wrap:anywhere;font-family:inherit}.wf-source img{width:100%}.wf-source blockquote{margin:0;border-left:3px solid var(--accent);padding:8px 12px}.wf-lookup-list{max-height:300px;overflow:auto}.wf-review-grid .formula{overflow-wrap:anywhere;white-space:pre-wrap}.wf-filters{grid-template-columns:repeat(4,minmax(0,1fr))}
+[data-notice-card][hidden]{display:none!important}
+@media(max-width:700px){.wf-filters,.wf-review-grid{grid-template-columns:1fr}.wf-calendar-row{flex-wrap:wrap}.wf-calendar-row>div{flex-basis:65%}.wf-source{max-height:35vh}.wf-plan-list .rule-heading{align-items:flex-start;flex-direction:column}.wf-tags .tag{white-space:normal}.wf-calendar-summary{font-size:12px}}
+
+.wf-pack-button{float:right;margin-bottom:12px}@media(max-width:700px){.wf-pack-button{float:none}}
+.wf-calendar-list{max-height:480px;overflow:auto}
+.wf-official-link{display:block;margin:10px 0 16px;font-weight:600}.wf-official-link small{display:block;margin-top:4px;font-weight:400;overflow-wrap:anywhere}

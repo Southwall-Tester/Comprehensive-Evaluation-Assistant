@@ -14,6 +14,7 @@ from .ingestion import extract, preview, MAX_BYTES, EXTENSIONS
 from .llm import settings, public_settings, save_settings, complete, context_for
 from .pipeline import build_policy, visual_read
 from .research import research, collect_notice, analyze_notice
+from .workflow import timing, prepare_plan, scenario, application_pack, review_numbers, apply_review
 
 tasks = {}
 
@@ -119,7 +120,7 @@ def state():
         documents=docs,
         policies=store.all_of("policy"),
         profiles=store.all_of("profile"),
-        notices=store.all_of("notice"),
+        notices=[{**n, "timing": timing(n)} for n in store.all_of("notice")],
         research=store.all_of("research"),
         jobs=store.all_of("job")[:30],
         plans=store.all_of("plan"),
@@ -244,6 +245,24 @@ async def import_policy(request: Request):
     return store.put("policy", data)
 
 
+@app.get("/api/policies/{id}/review")
+def policy_review(id):
+    policy = store.get("policy", id)
+    return {section: [{**r, "numbers": review_numbers(r["expression"])} for r in policy.get(section, [])]
+            for section in ("formulas", "item_rules")}
+
+
+@app.post("/api/policies/{id}/review")
+async def save_policy_review(id, request: Request):
+    old = store.get("policy", id)
+    updated = apply_review(old, await request.json())
+    updated.update(state="draft", version=old.get("version", 1) + 1)
+    updated["validation_errors"] = validate_policy(updated, {
+        x: store.get("document", x) for x in updated.get("document_ids", [])})
+    store.put("policy_history", dict(policy_id=id, policy=old))
+    return store.put("policy", updated)
+
+
 @app.post("/api/policies/{id}/activate")
 def activate(id):
     p = store.get("policy", id)
@@ -360,11 +379,12 @@ async def apply_proposal(id, request: Request):
         raise ValueError("这份提取结果已加入记录")
     data = await request.json()
     p = store.get("profile", draft["profile_id"])
+    p["document_ids"] = list(dict.fromkeys(p.get("document_ids", []) + draft.get("document_ids", [])))
     p["inputs"].update(data.get("inputs", {}))
     for key, rows in data.get("tables", {}).items():
         p["tables"].setdefault(key, []).extend(rows)
     for item in data.get("items", []):
-        item.update(id=uuid.uuid4().hex, state="pending")
+        item.update(id=uuid.uuid4().hex, state="pending", document_ids=draft.get("document_ids", []))
         p["items"].append(item)
     store.put("profile", p)
     draft["applied"] = True
@@ -458,7 +478,50 @@ def notice_analyze(id):
 
 @app.post("/api/plans")
 async def plan(request: Request):
-    return store.put("plan", await request.json())
+    body = await request.json()
+    body.pop("id", None)
+    if not str(body.get("title", "")).strip():
+        raise ValueError("请填写任务名称")
+    return store.put("plan", body)
+
+
+@app.put("/api/plans/{id}")
+async def update_plan(id, request: Request):
+    current = store.get("plan", id)
+    body = await request.json()
+    for key in ("title", "date", "notes", "checklist", "completed", "hours_per_week"):
+        if key in body:
+            current[key] = body[key]
+    if not str(current.get("title", "")).strip():
+        raise ValueError("请填写任务名称")
+    if current.get("date"):
+        datetime.strptime(current["date"], "%Y-%m-%d")
+    if not isinstance(current.get("checklist", []), list) or any(
+        not isinstance(x, dict) or not isinstance(x.get("done"), bool) or not x.get("text")
+        for x in current.get("checklist", [])
+    ):
+        raise ValueError("准备清单格式不正确")
+    return store.put("plan", current)
+
+
+@app.post("/api/notices/{id}/prepare")
+async def prepare(id, request: Request):
+    body = await request.json()
+    return prepare_plan(store.get("notice", id), store.get("profile", body["profile_id"]))
+
+
+@app.post("/api/profiles/{id}/scenario")
+async def simulate(id, request: Request):
+    profile = store.get("profile", id)
+    return scenario(store.get("policy", profile["policy_id"]), profile, await request.json())
+
+
+@app.get("/api/profiles/{id}/application-pack")
+def export_application(id):
+    profile = store.get("profile", id)
+    content = application_pack(profile, store.get("policy", profile["policy_id"]))
+    return Response(content, media_type="application/zip", headers={
+        "Content-Disposition": 'attachment; filename="evaluation-materials.zip"'})
 
 
 @app.delete("/api/plans/{id}")
@@ -468,7 +531,7 @@ def remove_plan(id):
 
 
 @app.get("/api/plans/calendar")
-def calendar():
+def calendar(policy_id: str = "", profile_id: str = ""):
     def escape(v):
         return (
             str(v)
@@ -486,6 +549,10 @@ def calendar():
         "CALSCALE:GREGORIAN",
     ]
     for p in store.all_of("plan"):
+        if p.get("completed") or (policy_id and p.get("policy_id") != policy_id):
+            continue
+        if profile_id and p.get("profile_id") not in (None, "", profile_id):
+            continue
         try:
             when = datetime.strptime(p["date"], "%Y-%m-%d")
         except (ValueError, KeyError):

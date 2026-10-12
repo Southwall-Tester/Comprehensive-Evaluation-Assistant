@@ -354,11 +354,16 @@ async def analyze_notice(notice, policy, log):
         + date.today().isoformat()
         + """
 输出结构 {"summary":"解读", "eligibility":["适用人群/年级/学校/赛道"],"actions":["准备步骤"],"materials":["所需材料与模板"],
-"dates":[{"label":"报名截止/校内截止/比赛时间等","date":"YYYY-MM-DD 或 null","quote":"逐字原文","document_id":"id","unit":1}],
-"scoring_matches":[{"rule_id":"当前规则中的id","explanation":"条件、级别、贡献比例和封顶如何影响综测；不明就待认定","citations":[{"document_id":"id","unit":1,"quote":"原文"}]}],
+"dates":[{"label":"报名开始/报名截止/校内报名截止/比赛时间等","scope":"school/national/unknown","track":"原文赛道或空字符串","date":"YYYY-MM-DD 或 null","quote":"逐字原文","document_id":"id","unit":1}],
+"registration_statuses":[{"label":"报名状态","registration_status":"open/not_open/closed/suspended/unknown","scope":"school/national/unknown","track":"适用组别或通用时空字符串","quote":"逐字原文","document_id":"id","unit":1}],
+"participation":{"format":{"value":"project/timed/mixed/unknown","citations":[]},"attendance":{"value":"remote/onsite/hybrid/unknown","citations":[]},"team":{"value":"solo/team/either/unknown","citations":[]}},
+"scoring_matches":[{"rule_id":"当前规则中的id","recognition":"named/inferred/pending/ineligible","category":"原文赛事类别或空","explanation":"条件、级别、赛道、贡献比例和封顶如何影响综测；不明就待认定","citations":[{"document_id":"id","unit":1,"quote":"原文"}]}],
 "questions":["待确认事项"],"citations":[{"document_id":"id","unit":1,"quote":"原文"}]}
 时间只有原文明确年份和日月才写date，不从页面URL推断日期、不把决赛日期当报名截止、不把旧年度日期套到今年。
+报名状态与具体开始日期分别提取：只要原文语义明确当前已开始报名（如即日起、现已开放、报名正在进行、自公告发布起等任何同义表述），registration_statuses 标 open，无需推算发布日期或补造开始日期。尚未开始用 not_open，已截止用 closed，暂停用 suspended；将来安排、欢迎报名等不能确认当前状态的用 unknown。必须理解否定、条件、组别和时间语境，不能仅见“报名”就判开放。上述例子不是限定词表。各组别的截止时间分别提取，track 填适用组别；共同的开始条件 track 留空。
 区分公告中的报名时限与校内选拔时限；报名是否仍开放要有报名时间直接依据。
+participation 每个字段都需公告引文。remote 仅适用于全部环节明确线上；线上提交但线下答辩应为 hybrid；未写答辩安排不能推定完全远程。project 为自行制作作品，timed 为限时现场或线上赛，mixed 为两者结合。
+recognition 的 named 仅表示当前细则明确列名且赛道对应；inferred 是按通用条款推断；ineligible 需要明确排除依据；没有依据用 pending。观察目录不等于正式榜单。recognition 的引文必须包含当前规则原文；上述状态均不是学校正式认定。
 计分映射以当前方案规则为准，特别核对赛道差异；赛事正在举办不代表仍能报名。所有重要断言提供可查引文。
 规则方案："""
         + json.dumps(policy, ensure_ascii=False)
@@ -388,13 +393,23 @@ async def analyze_notice(notice, policy, log):
             result["citation_warnings"].append("有分析引文未能匹配原文，请核对")
     for t in result.get("dates", []):
         t["verified"] = valid(t)
-        if t.get("date"):
-            t["verified"] = t["verified"] and date_supported(t["date"], t.get("quote", ""))
+        if t.get("date") and not date_supported(t["date"], t.get("quote", "")):
+            # Preserve a real undated start statement instead of discarding it
+            # just because the model guessed an absolute day for it.
+            t["date"] = None
         if not t["verified"]:
             t["date"] = None
+    for status in result.get("registration_statuses", []):
+        status["label"] = "报名状态"
+        status["verified"] = valid(status) and status.get("registration_status") in {
+            "open", "not_open", "closed", "suspended", "unknown"}
     valid_rules = {r["id"] for r in policy.get("item_rules", [])}
     for m in result.get("scoring_matches", []):
         m["verified_rule"] = m.get("rule_id") in valid_rules
+    from .workflow import enrich_analysis
+    for document_id in policy.get("document_ids", []):
+        index[document_id] = store.get("document", document_id)
+    result = enrich_analysis(result, policy, index)
     notice.update(analysis=result, generation=meta, state="analyzed", checked_at=store.now())
     log("已完成报名条件、时间、材料和计分对应分析")
     return store.put("notice", notice)
