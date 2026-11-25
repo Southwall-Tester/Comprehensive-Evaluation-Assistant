@@ -13,3 +13,12 @@
 .wf-pack-button{float:right;margin-bottom:12px}@media(max-width:700px){.wf-pack-button{float:none}}
 .wf-calendar-list{max-height:480px;overflow:auto}
 .wf-official-link{display:block;margin:10px 0 16px;font-weight:600}.wf-official-link small{display:block;margin-top:4px;font-weight:400;overflow-wrap:anywhere}
+
+.benefit-school-form{display:flex;align-items:flex-end;flex-wrap:wrap;gap:12px;margin-top:12px}
+.benefit-school-form .field{flex:1 1 220px;max-width:410px;margin:0}
+.benefit-grid{margin-top:16px}.benefit-grid:empty{display:none}
+.benefit-card,.benefit-issues{overflow-wrap:anywhere}.benefit-card .row{flex-wrap:wrap}
+.benefit-card h2{margin-top:12px}.benefit-card dl{margin:0}
+.benefit-card dt{color:var(--muted);font-size:12px;margin-top:10px}.benefit-card dd{margin:2px 0 0}
+.benefit-card details{margin-top:12px}#benefit-category{min-width:110px}
+@media(max-width:600px){#benefit-feed .rule-heading{flex-wrap:wrap;gap:8px}#benefit-feed .rule-heading .field{margin:0}}

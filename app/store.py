@@ -20,22 +20,28 @@ def connect():
     return c
 
 
-def put(kind, obj):
+def put(kind, obj, *, if_absent=False):
     obj = dict(obj)
     obj.setdefault("id", uuid.uuid4().hex)
     obj["updated_at"] = now()
     with connect() as c:
-        c.execute(
+        written = c.execute(
+            "INSERT OR IGNORE INTO objects VALUES (?,?,?)" if if_absent else
             "INSERT OR REPLACE INTO objects VALUES (?,?,?)",
             (kind, obj["id"], json.dumps(obj, ensure_ascii=False)),
         )
+        if if_absent and not written.rowcount:
+            row = c.execute("SELECT body FROM objects WHERE kind=? AND id=?", (kind, obj["id"])).fetchone()
+            return json.loads(row[0])
     return obj
 
 
-def get(kind, id):
+def get(kind, id, *, default=...):
     with connect() as c:
         r = c.execute("SELECT body FROM objects WHERE kind=? AND id=?", (kind, id)).fetchone()
     if r is None:
+        if default is not ...:
+            return default
         raise ValueError("记录不存在")
     return json.loads(r[0])
 

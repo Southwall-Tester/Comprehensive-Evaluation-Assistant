@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from app import store
 from app.main import app
-from app.workflow import timing, enrich_analysis, scenario, apply_review, review_numbers
+from app.workflow import timing, enrich_analysis, review_numbers
 from tests.test_engine import example, student, event
 
 

@@ -9,6 +9,7 @@ from fastapi import FastAPI, File, UploadFile, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from . import store
+from . import benefits
 from .engine import calculate, marginal, validate_policy, planned_gains
 from .ingestion import extract, preview, MAX_BYTES, EXTENSIONS
 from .llm import settings, public_settings, save_settings, complete, context_for
@@ -19,8 +20,8 @@ from .workflow import timing, prepare_plan, scenario, application_pack, review_n
 tasks = {}
 
 
-def job(kind, operation):
-    j = store.put("job", dict(kind=kind, state="running", logs=[], started_at=store.now()))
+def job(kind, operation, **context):
+    j = store.put("job", dict(kind=kind, state="running", logs=[], started_at=store.now(), **context))
 
     def log(message):
         latest = store.get("job", j["id"])
@@ -48,20 +49,52 @@ def job(kind, operation):
     return j
 
 
+def running_benefit(domain):
+    for task_id in tasks:
+        current = store.get("job", task_id)
+        if current["kind"] == "benefits" and current.get("domain") == domain:
+            return current
+    return None
+
+
+def start_benefits(domain):
+    if not domain:
+        raise ValueError("请先填写当前学校的官网")
+    return running_benefit(domain) or job("benefits", lambda log: benefits.discover_benefits(domain, log),
+                                          domain=domain)
+
+
+def schedule_benefits(policies, cfg):
+    if not cfg.get("auto_research"):
+        return
+    saved = {s["id"]: s for s in store.all_of("benefit_school")}
+    domains = {benefits.school_for(p, saved.get(p["id"])) for p in policies if p.get("state") == "active"}
+    domains.update(s["domain"] for s in saved.values())
+    for domain in sorted(domains - {""}):
+        previous = store.get("benefit_feed", domain, default=None)
+        if previous and datetime.now(timezone.utc) - datetime.fromisoformat(
+                previous["checked_at"]) < timedelta(hours=cfg["refresh_hours"]):
+            continue
+        start_benefits(domain)
+
+
 async def scheduled_research():
     while True:
         await asyncio.sleep(45)
-        if not settings().get("auto_research"):
+        cfg = settings()
+        if not cfg.get("auto_research"):
             continue
+        policies = store.all_of("policy")
+        schedule_benefits(policies, cfg)
         if any(j.get("state") == "running" and j["kind"] == "research" for j in store.all_of("job")):
             continue
-        for p in store.all_of("policy"):
+        for p in policies:
             if p.get("state") != "active" or not p.get("opportunities"):
                 continue
             previous = [r for r in store.all_of("research") if r.get("policy_id") == p["id"]]
             if previous and datetime.now(timezone.utc) - datetime.fromisoformat(
                 previous[0]["searched_at"]
-            ) < timedelta(hours=settings()["refresh_hours"]):
+            ) < timedelta(hours=cfg["refresh_hours"]):
                 continue
             job("research", lambda log, p=p: research(p, log))
             break
@@ -447,6 +480,37 @@ async def discover(request: Request):
     body = await request.json()
     p = store.get("policy", body["policy_id"])
     return job("research", lambda log: research(p, log, body.get("query"), body.get("limit")))
+
+
+@app.get("/api/benefits")
+async def school_benefits(policy_id: str = ""):
+    domain, suggested = benefits.scope(policy_id)
+    running = running_benefit(domain)
+    return dict(domain=domain, suggested=suggested, feed=store.get("benefit_feed", domain, default=None),
+                running=running["id"] if running else None)
+
+
+@app.put("/api/benefits/school")
+async def set_benefit_school(request: Request):
+    body = await request.json()
+    policy_id = body.get("policy_id")
+    if policy_id:
+        store.get("policy", policy_id)
+    domain = benefits.school_domain(body.get("domain"))
+    store.put("benefit_school", dict(id=policy_id or "_workspace", domain=domain))
+    return start_benefits(domain)
+
+
+@app.post("/api/benefits/search")
+async def find_school_benefits(request: Request):
+    domain, _ = benefits.scope((await request.json()).get("policy_id"))
+    return start_benefits(domain)
+
+
+@app.post("/api/benefits/{item_id}/plan")
+async def benefit_plan(item_id, request: Request):
+    profile = store.get("profile", (await request.json()).get("profile_id"))
+    return benefits.prepare_benefit(item_id, profile)
 
 
 @app.post("/api/notices/import")

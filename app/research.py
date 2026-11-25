@@ -55,11 +55,13 @@ async def public_url(url):
         raise ValueError("公告抓取不访问内网地址")
 
 
-async def fetch(url, limit=MAX_BYTES):
+async def fetch(url, limit=MAX_BYTES, *, domains=None):
     async with httpx.AsyncClient(
         timeout=35, headers={"User-Agent": USER_AGENT}, follow_redirects=False
     ) as client:
         for _ in range(6):
+            if domains is not None and not allowed(url, domains):
+                raise ValueError("页面跳转到当前学校官网以外")
             await public_url(url)
             async with client.stream("GET", url) as r:
                 if r.is_redirect:

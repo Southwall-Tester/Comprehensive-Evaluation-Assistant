@@ -1,6 +1,5 @@
 """Offline acceptance with synthetic data; no personal workspace or model calls."""
 from datetime import date, timedelta
-from io import BytesIO
 import json
 import os
 from pathlib import Path
@@ -15,17 +14,19 @@ from playwright.sync_api import sync_playwright, expect
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from tests.test_engine import example, student, event
-from scripts.check_usability import wait_ready, nav, put
+from tests.test_engine import example, student, event  # noqa: E402 (direct script entry point)
+from scripts.check_usability import wait_ready, nav, put  # noqa: E402
 
 ART = ROOT / 'artifacts'
 
 
 def fixtures(folder):
     today = date.today()
-    day = lambda offset: (today + timedelta(days=offset)).isoformat()
+    def day(offset):
+        return (today + timedelta(days=offset)).isoformat()
+
     policy = example()
-    policy.update(id='policy', state='active', version=1, document_ids=['test'])
+    policy.update(id='policy', state='active', version=1, document_ids=['test'], school_domain='example.edu')
     policy['item_rules'][0].update(label='测试赛事', requirements=['获奖证明'])
     profile = student([dict(event(), id='old', document_ids=['proof'])])
     profile.update(id='person', name='虚构验收记录', policy_id='policy', inputs={k:80 for k in ['ethics','study','sport','art','work']})
@@ -48,8 +49,17 @@ def fixtures(folder):
         notice('timed','限时乙',dict(format='timed',attendance='onsite',team='team')),
         notice('unknown','条件未知丙'),
         notice('closed','往届项目丁',dict(format='project',attendance='remote',team='solo'),True)]
+    checked = today.isoformat() + 'T08:00:00+00:00'
+    grant = dict(id='grant', title='虚构交通补贴', url='https://example.edu/aid', category='奖助与补贴',
+                 audience='面向在校学生。', offer='每月可申请交通补贴。', method='登录学生服务平台提交材料。',
+                 deadline=day(3), deadline_text=['申请截止日期为' + day(3)], checked_at=checked)
+    resource = dict(grant, id='tool', title='虚构软件服务', category='学习资源', url='https://example.edu/tools',
+                    offer='本校师生可免费使用教学软件。', deadline='', deadline_text=[])
+    feed = dict(id='example.edu', checked_at=checked, updated_at=checked, entries=[grant, resource],
+                fresh=2, pages_read=2, pending=[], failures=[])
     with sqlite3.connect(folder/'workspace.sqlite') as c:
         c.execute('CREATE TABLE objects(kind TEXT,id TEXT,body TEXT,PRIMARY KEY(kind,id))')
+        put(c, 'benefit_feed', feed)
         for kind, obj in [('policy',policy),('profile',profile),('document',doc),('document',proof)]+[('notice',n) for n in notices]:
             put(c,kind,obj)
     (folder/'settings.json').write_text(json.dumps(dict(auto_research=False)),encoding='utf-8')
@@ -63,7 +73,8 @@ def check_browser(base):
         def guard(route):
             url=route.request.url
             if not url.startswith(base+'/') or any(x in url for x in ['/api/research','/api/ask','/analyze','/ocr']):
-                blocked.append(url);route.abort()
+                blocked.append(url)
+                route.abort()
             else:
                 route.continue_()
         context.route('**/*',guard)
@@ -171,6 +182,47 @@ def check_browser(base):
         expect(page.locator('.wf-plan-list')).to_contain_text('恢复任务')
         assert 'BEGIN:VEVENT' not in page.request.get(base+'/api/plans/calendar?policy_id=policy&profile_id=person').text()
         checks.append('Desktop and mobile fit; completed tasks excluded from calendar')
+
+        nav(page, 'benefits')
+        card = page.locator('[data-benefit-id="grant"]')
+        expect(card).to_contain_text('登录学生服务平台提交材料')
+        expect(card.get_by_role('link')).to_have_attribute('href', 'https://example.edu/aid')
+        page.locator('#benefit-category').select_option('学习资源')
+        expect(card).to_have_count(0)
+        expect(page.locator('[data-benefit-id="tool"]')).to_be_visible()
+        page.locator('#benefit-category').select_option('奖助与补贴')
+        assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+        expect(page.locator('#toast')).to_be_hidden(timeout=8000)
+        page.evaluate('window.scrollTo(0, 0)')
+        page.screenshot(path=str(ART/'benefits-mobile.png'), full_page=True)
+        card.get_by_role('button', name='加入我的待办').click()
+        due = (date.today() + timedelta(days=3)).isoformat()
+        expect(page.locator('#wf-plan-date')).to_have_value(due)
+        page.locator('#wf-plan-notes').fill('已备好证明')
+        page.locator('[data-act="wf-save-plan"]').click()
+        expect(page.locator('#dialog')).not_to_be_visible()
+        page.reload()
+        card.get_by_role('button', name='查看我的待办').click()
+        expect(page.locator('#wf-plan-notes')).to_have_value('已备好证明')
+        page.locator('#dialog [data-act="close"]').click()
+        calendar = page.request.get(base+'/api/plans/calendar?policy_id=policy&profile_id=person').text()
+        assert calendar.count('BEGIN:VEVENT') == 1 and 'DTSTART;VALUE=DATE:' + due.replace('-', '') in calendar
+        page.set_viewport_size(dict(width=1440, height=1000))
+        expect(page.locator('[data-benefit-id="tool"]')).to_be_visible()
+        assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+        page.evaluate('window.scrollTo(0, 0)')
+        page.screenshot(path=str(ART/'benefits-desktop.png'), full_page=True)
+        checks.append('School benefit categories, official link, personal reminders and calendar work on both layouts')
+        second = dict(example(), name='另一所学校', school_domain='second.edu', document_ids=['test'])
+        imported = page.request.post(base+'/api/policies/import', data=second)
+        assert imported.ok
+        page.reload()
+        page.locator('#policy-select').select_option(imported.json()['id'])
+        expect(page.locator('#benefit-panel')).to_contain_text('second.edu')
+        expect(page.locator('[data-benefit-id]')).to_have_count(0)
+        page.locator('#policy-select').select_option('policy')
+        expect(page.locator('[data-benefit-id="grant"]')).to_be_visible()
+        checks.append('Switching schools replaces benefit results and restores the original feed on return')
         browser.close()
     assert not errors, errors
     assert not blocked, blocked
@@ -182,11 +234,14 @@ def main():
     report = ART/'workflow-check.json'
     report.write_text(json.dumps(dict(status='running')), encoding='utf-8')
     with tempfile.TemporaryDirectory(prefix='cea-workflow-') as temporary:
-        folder=Path(temporary);fixtures(folder)
+        folder=Path(temporary)
+        fixtures(folder)
         with socket.socket() as sock:
-            sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
+            sock.bind(('127.0.0.1',0))
+            port=sock.getsockname()[1]
         base=f'http://127.0.0.1:{port}'
-        env=os.environ.copy();env.update(CEA_DATA=str(folder),PYTHONIOENCODING='utf-8')
+        env=os.environ.copy()
+        env.update(CEA_DATA=str(folder),PYTHONIOENCODING='utf-8')
         with (folder/'server.log').open('w+b') as log:
             process=subprocess.Popen([sys.executable,'-m','uvicorn','app.main:app','--host','127.0.0.1','--port',str(port),'--log-level','warning'],cwd=ROOT,env=env,stdout=log,stderr=log,creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
             try:
@@ -197,7 +252,8 @@ def main():
                 report.write_text(json.dumps(dict(status='failed', error=str(error)),ensure_ascii=False,indent=2),encoding='utf-8')
                 raise
             finally:
-                process.terminate();process.wait(timeout=10)
+                process.terminate()
+                process.wait(timeout=10)
     print('WORKFLOW_PASS: filters, calendar, checklist, scenario, ZIP, source review, desktop/mobile')
 
 

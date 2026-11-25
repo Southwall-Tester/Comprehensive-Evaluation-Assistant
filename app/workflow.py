@@ -191,7 +191,7 @@ def timing(notice, today=None):
             assertions.append({**item, "scope": scope_for(item), "track": track_for(item), "registration_status": state})
     for item in raw_dates:
         try:
-            when = date.fromisoformat(item.get("date") or "")
+            date.fromisoformat(item.get("date") or "")
         except (ValueError, TypeError):
             continue
         if not item.get("verified"):

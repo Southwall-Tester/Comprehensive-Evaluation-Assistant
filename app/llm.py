@@ -229,6 +229,7 @@ JSON结构：
  "constraints":[{"expression":"count_rows('courses',\"kind == 'elective'\") <= 8","message":"请依据原文选择不超过8门","severity":"block","citations":[]}],
  "strategies":[{"title":"策略","detail":"条件、增益、边际收益、材料门槛。给合法利用规则的具体办法","citations":[]}],
  "opportunities":[{"name":"原文认可赛事或资格认证","category":"对应类别","rule_id":"competition","queries":["全称 报名 通知"],"eligibility":"是否依赖学校或赛道认定"}],
+ "school_domain":"细则原文能确认的学校官网域名，不含赛事主办方；未知填空字符串",
  "official_domains":["所属学校域名","主办方域名"],
  "unresolved":["原文歧义与无法完整自动表达的例外"]
 }
