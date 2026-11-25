@@ -23,6 +23,9 @@ function benefitSchoolForm(domain, suggested, apiNotice) {
       <a href="https://xsjy.whu.edu.cn/a/common/student/consultingNew/consultingCalendar" target="_blank" rel="noopener noreferrer">就业指导预约</a> ·
       <a href="https://museum.whu.edu.cn/fwzn.htm" target="_blank" rel="noopener noreferrer">万林艺术博物馆参观</a> ·
       <a href="https://oldwww.lib.whu.edu.cn/webfile/category/ydcd_jh/1084.html" target="_blank" rel="noopener noreferrer">图书馆词典笔借还</a></p>
+      <p><a href="https://oldwww.lib.whu.edu.cn/webfile/category/Document_delivery.html" target="_blank" rel="noopener noreferrer">文献传递补贴</a> ·
+      <a href="https://nic.whu.edu.cn/fwzc/jgfw/bmfw/xywfw/eduroamsysm.htm" target="_blank" rel="noopener noreferrer">跨校免费 Wi-Fi</a> ·
+      <a href="https://service.whu.edu.cn/info/1012/17611.htm" target="_blank" rel="noopener noreferrer">学生火车优惠卡办理窗口</a></p>
       <div><h3>武汉大学大模型 API 服务</h3>
       <p>全校师生均可申请。智慧校园部审核通过后，每人每月享有 <strong>300 积分，约合 3,000 万 Token</strong>。实际调用量随模型单价变化，申请通过后到校方大模型服务平台查看密钥和请求地址。</p>
       <p><a href="https://nic.whu.edu.cn/zhlj1.htm" target="_blank" rel="noopener noreferrer">智慧珞珈服务号入口</a> ·
