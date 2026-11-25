@@ -8,7 +8,7 @@ function benefitsView() {
     '<div id="benefit-panel" aria-busy="true"><p class="muted">正在读取当前学校…</p></div>';
 }
 
-function benefitSchoolForm(domain, suggested) {
+function benefitSchoolForm(domain, suggested, apiNotice) {
   const form = `<form id="benefit-school-form" class="benefit-school-form">
     <label class="field"><span>学校官网域名</span><input id="benefit-domain" required
       value="${esc(domain || suggested)}" placeholder="例如 whu.edu.cn" autocapitalize="none" spellcheck="false"></label>
@@ -23,6 +23,12 @@ function benefitSchoolForm(domain, suggested) {
       <a href="https://xsjy.whu.edu.cn/a/common/student/consultingNew/consultingCalendar" target="_blank" rel="noopener noreferrer">就业指导预约</a> ·
       <a href="https://museum.whu.edu.cn/fwzn.htm" target="_blank" rel="noopener noreferrer">万林艺术博物馆参观</a> ·
       <a href="https://oldwww.lib.whu.edu.cn/webfile/category/ydcd_jh/1084.html" target="_blank" rel="noopener noreferrer">图书馆词典笔借还</a></p>
+      <div><h3>武汉大学大模型 API 服务</h3>
+      <p>全校师生均可申请。智慧校园部审核通过后，每人每月享有 <strong>300 积分，约合 3,000 万 Token</strong>。实际调用量随模型单价变化，申请通过后到校方大模型服务平台查看密钥和请求地址。</p>
+      <p><a href="https://nic.whu.edu.cn/zhlj1.htm" target="_blank" rel="noopener noreferrer">智慧珞珈服务号入口</a> ·
+      <a href="https://hall.whu.edu.cn/taskcenter/workflow/index" target="_blank" rel="noopener noreferrer">校方办事大厅</a></p>
+      ${apiNotice ? `<a href="${safeUrl(apiNotice.url)}" target="_blank" rel="noopener noreferrer">查看检索到的校方公告原文 ↗</a>` :
+        '<small>额度与流程依据通知摘录。发布日期、文章原文和专用申请表直链待核实。</small>'}</div>
       <details><summary>学生可领的校外 AI 额度</summary><ul class="list">
       <li><a href="https://opc.aliyun.com/summer-2026" target="_blank" rel="noopener noreferrer">阿里云高校 AI 通行证</a>　完成高校学生认证后，可领取 300 元高校专享券并选择模型额度方案。</li>
       ${guidanceToday() <= '2026-12-31' ? '<li><a href="https://cloud.tencent.com/document/product/1823/130053" target="_blank" rel="noopener noreferrer">腾讯云 TokenHub 新人体验包</a>　符合条件的主账号可在模型广场勾选语言模型，每个模型 100 万 Token，领取后有效 1 年。本期截至 2026 年 12 月 31 日。</li>' : ''}
@@ -45,7 +51,8 @@ function benefitCard(item, feed) {
   return `<article class="card benefit-card" data-benefit-id="${esc(item.id)}">
     <div class="row"><span class="tag">${esc(item.category)}</span><small>${esc(dateText)}</small></div>
     <h2>${esc(item.title)}</h2>
-    <a class="wf-official-link" href="${safeUrl(item.url)}" target="_blank" rel="noopener noreferrer">学校官网原文 ↗<small>${esc(item.url)}</small></a>
+    <a class="wf-official-link" href="${safeUrl(item.url)}" target="_blank" rel="noopener noreferrer">${item.source_page ? '公众号原文' : '学校官网原文'} ↗<small>${esc(item.url)}</small></a>
+    ${item.source_page ? `<a href="${safeUrl(item.source_page)}" target="_blank" rel="noopener noreferrer">${item.campus_linked ? '发布此链接的校方页面' : '校方账号核对来源'} ↗</a>` : ''}
     ${item.offer ? `<p>${esc(item.offer)}</p>` : ''}
     ${facts.length ? `<dl>${facts.map(([label, value]) => `<dt>${label}</dt><dd>${esc(value)}</dd>`).join('')}</dl>` : ''}
     ${item.conditions?.length ? `<details><summary>查看申请条件原文</summary>${list(item.conditions)}</details>` : ''}
@@ -87,6 +94,7 @@ function showBenefitFeed(feed, category, period, running) {
       ${wfSelect('benefit-published','官网发布日期',[['','全部日期'],['7','近 7 天'],['30','近 30 天']],period)}</div>` : ''}
     ${feed.directories?.length ? `<details><summary>本次读到的学校栏目（${feed.directories.length}）</summary><ul class="list benefit-issues">${feed.directories.map(d =>
       `<li><a href="${safeUrl(d.url)}" target="_blank" rel="noopener noreferrer">${esc(d.title)}</a>　${esc(d.url)}</li>`).join('')}</ul></details>` : ''}
+    ${Number.isInteger(feed.public_articles_read) ? `<p class="muted">本次读到 ${esc(feed.public_articles_read)} 篇微信公众号正文。</p>` : ''}
     ${feed.pending?.length ? `<details><summary>待核对公告（${feed.pending.length}）</summary><ul class="list benefit-issues">${feed.pending.map(p =>
       `<li><a href="${safeUrl(p.url)}" target="_blank" rel="noopener noreferrer">${esc(p.title)}</a>　${esc(p.reason)}</li>`).join('')}</ul></details>` : ''}
     ${feed.failures.length ? `<details><summary>${feed.failures.length} 处来源或检索未完成</summary><ul class="list benefit-issues">${feed.failures.map(f =>
@@ -101,9 +109,12 @@ async function refreshBenefits() {
   try {
     const data = await api('/api/benefits?policy_id=' + encodeURIComponent(policyId || ''));
     if (!panel.isConnected || request !== benefitRequest) return;
-    const key = JSON.stringify([data.domain, data.suggested]);
+    const apiNotice = data.domain === 'whu.edu.cn' && data.feed?.entries?.find(item =>
+      item.category === 'AI 与算力' && item.title.replace(/\s+/g,'').includes('武汉大学大模型API服务开放申请') &&
+      /300\s*积分|3,?000\s*万\s*Tokens?/i.test(item.offer || ''));
+    const key = JSON.stringify([data.domain, data.suggested, apiNotice?.url]);
     if (panel.dataset.school !== key) {
-      panel.innerHTML = benefitSchoolForm(data.domain,data.suggested) + '<div id="benefit-feed"></div>';
+      panel.innerHTML = benefitSchoolForm(data.domain,data.suggested,apiNotice) + '<div id="benefit-feed"></div>';
       panel.dataset.school = key;
       delete panel.dataset.revision;
     }

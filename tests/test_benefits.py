@@ -96,6 +96,79 @@ def test_generic_activity_requires_an_explicit_student_entitlement(statement, ex
         assert card["offer"] == statement
 
 
+@pytest.mark.parametrize(("line", "eligible"), [
+    ("每位用户每月享有300积分额度（换算成Token约3000万）。", True),
+    ("每位通过审批的用户，每月300积分，按平台计费规则折算，约相当于3000万Token。", True),
+    ("每位获批的学生每学期可用180 GPU机时。", True),
+    ("付费会员每月享有300万Tokens。", False),
+    ("每位用户不再享有每月300积分额度，约合3000万Token。", False),
+    ("价格示例：每月300积分可换算为约3000万Token。", False),
+])
+def test_recurring_allowance_uses_the_notices_own_units(line, eligible):
+    html = ("<title>大模型 API 服务开放申请</title><article><p>武汉大学智慧校园部面向全校师生开放服务。</p>"
+            f"<p>{line}</p><p>师生提交申请，审批通过后登录平台获取密钥。</p></article>")
+    card = benefits.read_benefit(BeautifulSoup(html, "html.parser"), "https://whu.edu.cn/example")
+    assert bool(card) is eligible
+    if card:
+        assert card["category"] == "AI 与算力" and card["offer"] == line
+        assert "审批" in card["method"] and not card["published_on"]
+
+
+@pytest.mark.parametrize("labelled_directory", [False, True])
+def test_new_public_account_notices_discovered_from_issuer_without_title_hints(monkeypatch, labelled_directory):
+    campus = "https://nic.whu.edu.cn/zhlj1.htm" if labelled_directory else "https://whu.edu.cn/"
+    wx = "https://mp.weixin.qq.com/s/"
+    def article(title, biz, content):
+        return (f'<h1 id="activity-name">{title}</h1><a id="js_name">智慧珞珈</a>'
+                f'<script>var biz = "{biz}";</script><div id="js_content">{content}</div>')
+
+    offer = "<p>面向全校师生开放本服务。</p><p>每位用户每月享有300积分额度（换算成Token约3000万）。</p>"
+    pages = {
+        campus: '<a href="http://mp.weixin.qq.com/s/intro">本部门公众号服务介绍</a>',
+        wx+"intro": article("部门通讯", "MzCampusA", "<p>近期校园服务信息汇总。</p>"),
+        wx+"new": article("本学期服务安排", "MzCampusA", offer),
+        wx+"other": article("同名账号消息", "MzOtherB", offer),
+        wx+"gated": "<div>环境异常，完成验证后继续。</div>",
+    }
+    signed = "https://mp.weixin.qq.com/s?__biz=MzCampusA&mid=12345"
+    if labelled_directory:
+        pages[campus] = f'<a href="{signed}"><span>官方微信</span>中心服务介绍</a>'
+        pages[signed] = "<div>请在微信内打开。</div>"
+    reads = []
+    async def fetch(url, *, limit, domains):
+        reads.append(url)
+        if url.startswith(wx):
+            assert domains == ["mp.weixin.qq.com"]
+        else:
+            assert domains == ["whu.edu.cn", "www.whuss.com"]
+        return f"<html><body>{pages.get(url, '')}</body></html>".encode(), url, "text/html", {}
+
+    async def search(query, cfg):
+        if query.startswith("site:mp.weixin.qq.com"):
+            return [{"url": wx+p, "title": "智慧珞珈 本学期安排", "snippet": "错误的100亿Token"}
+                    for p in ["new", "other", "gated"]] + [
+                        {"url": "https://mp.weixin.qq.com.evil.com/s/new", "title": "武汉大学活动"}]
+        return []
+
+    monkeypatch.setattr(benefits, "fetch", fetch)
+    monkeypatch.setattr(benefits, "search", search)
+    monkeypatch.setattr(benefits, "SCHOOLS", {"武汉大学": ("whu.edu.cn", (campus,))})
+    monkeypatch.setattr(benefits, "SERVICE_GUIDES", {})
+    for index in range(2):
+        asyncio.run(benefits.discover_benefits("whu.edu.cn", lambda _: None))
+        feed = store.get("benefit_feed", "whu.edu.cn")
+        assert len(feed["entries"]) == 1 and feed["added"] == (1 if not index else 0)
+        card = feed["entries"][0]
+        assert card["url"] == wx+"new" and card["source_page"] == campus and not card["campus_linked"]
+        assert "300积分" in card["offer"] and "100亿" not in str(card)
+        waiting = {wx+"other", wx+"gated"}
+        if labelled_directory and index == 0:
+            waiting.add(signed)
+        assert {p["url"] for p in feed["pending"]} == waiting
+        pages[campus] = "<p>目录更新</p>"
+    assert not any("evil.com" in url for url in reads)
+
+
 def test_recent_unlabelled_notice_and_affiliated_domain_survive_refresh(monkeypatch):
     root = "https://www.whuss.com/category/20"
     article = "https://www.whuss.com/article/1"

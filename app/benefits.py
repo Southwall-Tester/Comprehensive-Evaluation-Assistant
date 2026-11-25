@@ -5,7 +5,7 @@ import hashlib
 import re
 from datetime import date, timedelta
 from itertools import zip_longest
-from urllib.parse import urldefrag, urljoin, urlsplit
+from urllib.parse import parse_qs, urldefrag, urljoin, urlsplit
 
 import httpx
 from bs4 import BeautifulSoup
@@ -21,18 +21,28 @@ SCHOOLS = {
         "https://future.whu.edu.cn/", "https://uc.whu.edu.cn/", "https://cs.whu.edu.cn/",
         "https://xgb.whu.edu.cn/", "https://gs.whu.edu.cn/", "https://zwhqb.whu.edu.cn/zhxx/tzgg.htm",
         "https://www.lib.whu.edu.cn/", "https://oldwww.lib.whu.edu.cn/",
-        "https://nic.whu.edu.cn/index/xwzx.htm", "https://hpc.whu.edu.cn/", "https://www.whuss.com/category/20",
+        "https://nic.whu.edu.cn/index/xwzx.htm", "https://nic.whu.edu.cn/index/tzgg.htm",
+        "https://hpc.whu.edu.cn/", "https://www.whuss.com/category/20",
         "https://museum.whu.edu.cn/ggjy/gjhd.htm", "https://xsjy.whu.edu.cn/",
+        "https://nic.whu.edu.cn/fwzc/xsfw.htm", "https://nic.whu.edu.cn/zhlj1.htm", "https://news.whu.edu.cn/",
     )),
 }
 # The university's school directory links to this independently hosted college.
 AFFILIATED_HOSTS = {"whu.edu.cn": ("www.whuss.com",)}
+# Names identified by the university. A name alone cannot authenticate a search hit.
+PUBLIC_ACCOUNTS = {"whu.edu.cn": {"武汉大学": "https://news.whu.edu.cn/",
+                                 "智慧珞珈": "https://nic.whu.edu.cn/zhlj1.htm"}}
+# Notices with an excerpt but no independently located original. Recheck the
+# campus and public-account indexes alongside the broad discovery queries.
+NOTICE_LOOKUPS = {"whu.edu.cn": ("武汉大学大模型API服务开放申请",)}
 SERVICE_GUIDES = {"whu.edu.cn": (
     ("https://oldwww.lib.whu.edu.cn/webfile/category/3d_printing/382.html", "图书馆 3D 打印服务"),
     ("https://xlzx.whu.edu.cn/zxgk/zxjs.htm", "学生心理健康教育中心服务"),
     ("https://news.whu.edu.cn/info/1006/505267.htm", "全校师生 GeoScene 软件使用权"),
     ("https://oldwww.lib.whu.edu.cn/webfile/category/ydcd_jh/1084.html", "图书馆有道词典笔借还"),
     ("https://museum.whu.edu.cn/fwzn.htm", "万林艺术博物馆免费参观"),
+    ("https://nic.whu.edu.cn/fwzc/jgfw/bmfw/xywfw/eduroamsysm.htm", "校际 eduroam 无线网络漫游"),
+    ("https://oldwww.lib.whu.edu.cn/webfile/category/Document_delivery.html", "馆际互借与文献传递补贴"),
 )}
 TOPICS = (
     ("奖助与补贴", "学生 助学金 奖学金 补贴 申请",
@@ -46,17 +56,22 @@ TOPICS = (
 )
 # A neutral announcement can disclose a benefit only in its body. Require a
 # resource and an entitlement in the same clause before making it actionable.
+DIGITAL_RESOURCE = r"(?<![a-z])tokens?(?![a-z])|词元|算力(?:券|额度|资源|支持)|(?:模型|API)(?:调用|使用|服务)?(?:额度|积分)|(?:GPU|超算)\s*机时"
 RESOURCE_OFFERS = (
-    ("AI 与算力", r"(?<![a-z])tokens?(?![a-z])|词元|算力(?:券|额度|资源|支持)|(?:模型|API)(?:调用|使用|服务)?额度|(?:GPU|超算)机时"),
+    ("AI 与算力", DIGITAL_RESOURCE),
     ("学习资源", r"3D\s*(?:模型|打印)|设备(?:借用|借阅)|器材(?:借用|借阅)|软件(?:授权|许可|使用权)|数据库访问|文献传递"),
     ("文体活动", r"展览参观|入馆参观|演出门票|观演名额|体育场(?:地|馆)|公益讲解"),
     ("就业服务", r"简历(?:诊断|辅导|优化)|生涯咨询|求职(?:咨询|辅导|住宿)|职业照拍摄"),
     ("校园生活", r"(?:个体|团体)?心理(?:咨询|辅导)|心理测试与评估|场地(?:使用|预约)|门票"),
+    ("校园网络", r"eduroam|无线网络|无线漫游"),
     ("科创支持", r"项目经费|材料费(?:用)?(?:补助|报销)|设备场地支持|导师指导"),
 )
-GRANT = r"(?:免费|无偿|免收|赠送|获赠|发放|申领|领取|补贴|报销|资助|可获|提供)"
+GRANT = r"(?:免费|无偿|免收|赠送|获赠|发放|申领|领取|补贴|报销|资助|可获|享有|获配|获批可用|提供)"
 NEGATED = re.compile(r"(?:不|未|无|禁止)(?:再|会|能|可|得|予|另行|额外|可以)?"
-                     r"(?:免费|提供|申请|减免|资助|发放|享受|免收|赠送|领取|申领|开放)|自费|付费购买|按量收费")
+                     r"(?:免费|提供|申请|减免|资助|发放|享受|享有|免收|赠送|领取|申领|开放)|自费|付费购买|按量收费")
+RECURRING_ALLOWANCE = re.compile(r"每(?:日|天|周|月|年|学期|学年)(?:可用|享有|享受|配给|分配|获配|可获|额度为|可使用)?"
+                                 r"\s*\d[\d,.]*\s*[万亿]?\s*(?:积分|词元|tokens?(?![a-z])|(?:GPU\s*)?机时|小时)", re.I)
+PAID_QUOTA = re.compile(r"充值|售价|购买后|付费(?:用户|会员|订阅)|需支付|按月收费|示例|假设")
 RECAP = re.compile(r"回顾|纪实|圆满(?:结束|落幕|举行)|成功(?:举办|举行)|顺利(?:举办|举行)|培训会在.+举行")
 RECENT_ARTICLE = re.compile(r"(?:/info/\d+/\d+\.\w+|/(?:article|content)/\d+|/\d+\.\w+|news\.newscontenturl|/\d{6,}/)", re.I)
 RESOURCE_MENTION = re.compile("|".join(pattern for _, pattern in RESOURCE_OFFERS), re.I)
@@ -71,8 +86,9 @@ CONDITIONAL_TOPICS = (
     ("学习资源", r"培训预告|数据库.{0,12}发布",
      r"(?:培训|讲座).{0,15}(?:无需报名|免费)|(?:开放研究数据平台.{0,10}公开发布|公开下载|免费下载)"),
     ("学习资源", r"(?:设备|器材|词典笔|阅读器).{0,8}(?:借还|借阅|借用)", r"限借\s*\d|借期\s*\d+\s*天"),
+    ("学习资源", r"(?:文献传递|馆际互借).{0,16}补贴", r"(?:\d+\s*[%％]|全额)\s*补贴"),
 )
-CHANNEL = re.compile(r"学生资助|资助中心|办事指南|图书馆|学生工作|通知公告|服务指南|岗位招聘|数据库资源|学生通知|海外学习|网信动态|新闻动态|教育动态|校园活动|读者服务|算力服务|展览预告|公教活动|指导活动")
+CHANNEL = re.compile(r"学生资助|资助中心|办事指南|图书馆|学生工作|通知公告|服务指南|岗位招聘|数据库资源|学生通知|海外学习|网信动态|新闻动态|教育动态|校园活动|读者服务|算力服务|展览预告|公教活动|指导活动|学生服务|服务支持|公众号|服务号")
 EXCLUDED = re.compile(r"公示|获奖名单|受助名单|评选结果|评审结果|颁奖|颁发仪式|表彰大会|采购|招标|中标|"
                       r"新闻回顾|停止办理|停止服务|到账通知|劳酬统计填报|名额已满|[（(]已满[）)]")
 TOPIC_INDEX = re.compile(r"^(?:奖助学金|奖学金|助学金|勤工助学|学生资助|校园福利)(?:\s*[-—_|｜].*)?$")
@@ -88,7 +104,7 @@ METHOD = (r"登录|登陆|提交申请|填写.{0,15}申请|凭.{1,15}(?:领取|�
 TERMS = re.compile(r"服务年限|毕业后.{0,35}(?:就业|工作|服务)|违约.{0,20}(?:返还|退还|偿还)|"
                    r"(?:不得|不可|不能).{0,10}(?:兼得|兼报|重复申领|同时享受)|未享受.{0,25}其他.{0,12}助学金|"
                    r"同一家庭.{0,15}(?:一人|1人)|仅对校园网开放|校外.{0,16}VPN|"
-                   r"自理.{0,12}学费|学费.{0,20}自理|试用有效期|逾期费", re.I)
+                   r"自理.{0,12}学费|学费.{0,20}自理|试用有效期|逾期费|不同模型.{0,14}(?:单价|价格)", re.I)
 APPLICATION = r"(?:申请|申报|申领|办理|领取|报名|提交材料|材料(?:的)?提交)"
 WINDOW = re.compile(rf"{APPLICATION}(?:的|受理)?(?:截止|截至|起止|时间|时限|期限|期间|日期)"
                     rf"|(?:在|于|自|从)[^，,。；;]{{0,45}}(?:年|月|日|号)[^，,。；;]{{0,32}}{APPLICATION}"
@@ -98,7 +114,7 @@ UNIT_SUBMISSION = re.compile(r"(?:^|[，,；;])\s*(?:[\d一二三四五六七八
                              r"(?:学院|院系|培养单位|学校|分团委)[^。；;]{0,110}(?:报送|报至|汇总|送校|上报|发送)")
 FULL_DATE = r"(?<!\d)(\d{4})\s*(?:年|[-./])\s*(\d{1,2})\s*(?:月|[-./])\s*(\d{1,2})(?!\d)\s*日?"
 DATE_TOKEN = re.compile(FULL_DATE)
-LANDING_CONTENT = (".v_news_content", "#vsb_content", ".wp_articlecontent", ".TRS_Editor",
+LANDING_CONTENT = ("#js_content", ".v_news_content", "#vsb_content", ".wp_articlecontent", ".TRS_Editor",
                    ".article-content", ".article_content", ".titleContent .content", ".artice",
                    "article", "main", "#content", ".content")
 
@@ -167,6 +183,8 @@ def publication_date(soup):
               if str(tag.get("name") or tag.get("property") or tag.get("itemprop")).lower()
               in {"pubdate", "articlepublishtime", "article:published_time", "datepublished", "publishdate"}]
     values += [tag.get("datetime", "") for tag in soup.select("time[pubdate], time[itemprop=datePublished]")]
+    if soup.select_one("#js_content") and (stamp := soup.select_one("#publish_time")):
+        values.append(stamp.get_text(strip=True))
     label = re.compile(r"^(?:发布日期|发布时间|发表时间|发布于)\s*[：:]?\s*")
     for node in soup.find_all(string=label):
         line = node.parent.get_text(" ", strip=True)
@@ -188,13 +206,22 @@ def first_excerpt(lines, patterns):
                  if 8 <= len(line) <= 450 and re.search(pattern, line)), "")
 
 
-def resource_offer(lines):
+def resource_offer(lines, title=""):
     for kind, resource in RESOURCE_OFFERS:
         gap = r"[^。！？；;，]{0,35}"
         grant = re.compile(rf"{GRANT}{gap}(?:{resource})|(?:{resource}){gap}(?:免费|无偿|可申领|可领取)", re.I)
         for line in lines:
+            if len(line) > 450:
+                continue
+            if kind == "AI 与算力" and PAID_QUOTA.search(line):
+                continue
+            if kind == "AI 与算力" and RECURRING_ALLOWANCE.search(line) and re.search(
+                rf"{DIGITAL_RESOURCE}|大模型\s*API", title + line, re.I
+            ) and re.search(r"每(?:位|个|人|生)|获批|通过审批|享有|获配|人均", line):
+                if not NEGATED.search(line) and not re.search(r"曾发放|已结束|不再", line):
+                    return kind, line
             for clause in re.split(r"[，；;]|,(?!\d{3})", line):
-                if len(line) <= 450 and grant.search(clause) and not NEGATED.search(clause):
+                if grant.search(clause) and not NEGATED.search(clause):
                     if not re.search(r"身份令牌|访问令牌|验证令牌|access[_ ]?token|token\s*验证|"
                                      r"(?:曾|已)(?:经)?[^。；]{0,14}(?:发放|领取|赠送)|"
                                      r"(?:现场|会上)[^。；]{0,22}(?:发放|领取|赠送)了", clause, re.I):
@@ -278,7 +305,7 @@ def application_conditions(lines):
 def read_benefit(soup, url, *, guide_title="", listed_on=""):
     meta = soup.find("meta", attrs={"name": re.compile("^articletitle$", re.I), "content": True})
     candidates = ([meta["content"].strip()] if meta else []) + [
-        tag.get_text(" ", strip=True) for tag in (soup.select_one("h1"), soup.title) if tag]
+        tag.get_text(" ", strip=True) for tag in (soup.select_one("#activity-name, h1"), soup.title) if tag]
     if not any(category(t) for t in candidates):
         heading = soup.select_one("article h2, main h2, h2.article-title, h2.news-title")
         if heading:
@@ -308,8 +335,8 @@ def read_benefit(soup, url, *, guide_title="", listed_on=""):
     body = re.sub(r"20\s*(\d)\s*(\d)(?=\s*年)", r"20\1\2", content.get_text())
     lines = list(dict.fromkeys(s.strip() for s in re.split(r"\n|(?<=[。！？；])", body) if s.strip()))
     kind = category(title)
-    body_kind, body_offer = resource_offer([line for line in lines if line not in candidates and line != title])
-    if re.search(RESOURCE_OFFERS[0][1], title, re.I) and body_kind != "AI 与算力":
+    body_kind, body_offer = resource_offer([line for line in lines if line not in candidates and line != title], title)
+    if re.search(DIGITAL_RESOURCE, title, re.I) and body_kind != "AI 与算力":
         return None
     conditional = next((evidence for name, headline, evidence in CONDITIONAL_TOPICS
                         if name == kind and re.search(headline, title)), "")
@@ -362,13 +389,52 @@ def candidate_batch(urls, next_url, limit=48):
     return urls[:split] + rotated[:limit - split], rotated[limit - split]
 
 
+def wechat_url(url):
+    try:
+        parts = urlsplit(url or "")
+    except ValueError:
+        return ""
+    if parts.scheme not in {"http", "https"} or parts.netloc != "mp.weixin.qq.com":
+        return ""
+    if re.fullmatch(r"/s/[\w-]+", parts.path) or (
+            parts.path == "/s" and {"__biz", "mid"} <= parse_qs(parts.query).keys()):
+        return parts._replace(scheme="https", fragment="").geturl()
+    return ""
+
+
+def account_identity(soup):
+    byline = soup.select_one("#js_name")
+    name = byline.get_text(strip=True) if byline else ""
+    for tag in soup.select('meta[property="og:url"], link[rel="canonical"]'):
+        value = tag.get("content") or tag.get("href") or ""
+        if wechat_url(value):
+            biz = parse_qs(urlsplit(value).query).get("__biz", [""])[0]
+            if biz:
+                return name, biz
+    for tag in soup.find_all("script"):
+        match = re.search(r"""\b(?:var\s+)?(?:biz|__biz)\s*=\s*["']([\w+/=-]{6,80})["']""", tag.string or "")
+        if match:
+            return name, match[1]
+    return name, ""
+
+
+def matching_lookups(lookups, searches):
+    return {url: title for phrase, hits in zip(lookups, searches) for url, title in hits
+            if "".join(phrase.split()).casefold() in "".join(title.split()).casefold()}
+
+
 async def discover_benefits(domain, log):
     cfg = settings()
     domain = school_domain(domain)
     checked_at = store.now()
     previous = store.get("benefit_feed", domain, default={})
     domains = [domain, *AFFILIATED_HOSTS.get(domain, ())]
-    entries = {e["url"]: e for e in previous.get("entries", []) if allowed(e["url"], domains)}
+    accounts = PUBLIC_ACCOUNTS.get(domain, {})
+    publishers = {name: record for name, record in previous.get("public_publishers", {}).items()
+                  if name in accounts and allowed(record.get("origin", ""), domains)}
+    entries = {e["url"]: e for e in previous.get("entries", []) if allowed(e["url"], domains)
+               or (wechat_url(e["url"]) and allowed(e.get("source_page", ""), domains))}
+    referrals = {}
     guide_titles = dict(SERVICE_GUIDES.get(domain, ()))
     listing_dates = {}
     checked_directories = {}
@@ -383,7 +449,8 @@ async def discover_benefits(domain, log):
                 for attempt in range(2):
                     try:
                         async with asyncio.timeout(30):
-                            raw, final, ctype, _ = await fetch(url, limit=3 * 1024 * 1024, domains=domains)
+                            permitted = ["mp.weixin.qq.com"] if wechat_url(url) else domains
+                            raw, final, ctype, _ = await fetch(url, limit=3 * 1024 * 1024, domains=permitted)
                         break
                     except (TimeoutError, httpx.TransportError):
                         if attempt:
@@ -391,6 +458,8 @@ async def discover_benefits(domain, log):
                 if "html" not in ctype.lower():
                     raise ValueError("此来源不是 HTML 网页")
                 soup = BeautifulSoup(raw, "html.parser")
+                if wechat_url(url) and (not wechat_url(final) or not soup.select_one("#js_content")):
+                    raise ValueError("未取得微信公众号文章正文")
                 if soup.title and re.search(r"统一身份认证|用户登录|身份认证平台", soup.title.get_text(strip=True)):
                     raise ValueError("官网要求登录")
                 if not soup.body or re.search(r"访问验证|checking your browser|verify you are human|CF_APP_WAF",
@@ -401,15 +470,24 @@ async def discover_benefits(domain, log):
                 failures.append(dict(source=url, reason=str(error)[:180] or "读取超时"))
                 return None
 
-    async def query(words):
-        text = f"site:{domain} {words}"
+    async def query(words, *, public=False):
+        text = f"site:{'mp.weixin.qq.com' if public else domain} {words}"
         try:
             async with asyncio.timeout(18):
                 hits = await search(text, cfg)
-            return [(urldefrag(h["url"]).url, h["title"]) for h in hits
-                    if in_school(h.get("url", "")) and h.get("title") and not EXCLUDED.search(h["title"])
-                    and (category(h["title"]) or OPEN_CALL.search(h["title"]) or
-                         RESOURCE_MENTION.search(h["title"] + " " + (h.get("snippet") or "")))]
+            found = []
+            for hit in hits:
+                url, title = hit.get("url", ""), hit.get("title") or ""
+                excerpt = title + " " + (hit.get("snippet") or "")
+                if not title or EXCLUDED.search(title):
+                    continue
+                if public:
+                    article = wechat_url(url)
+                    if article and any(name in excerpt for name in accounts):
+                        found.append((article, title))
+                elif in_school(url) and (category(title) or OPEN_CALL.search(title) or RESOURCE_MENTION.search(excerpt)):
+                    found.append((urldefrag(url).url, title))
+            return found
         except Exception as error:
             failures.append(dict(source=text, reason=str(error)[:180] or "检索超时"))
             return []
@@ -420,11 +498,27 @@ async def discover_benefits(domain, log):
         except ValueError:
             return False
 
+    def collect_referrals(soup, origin):
+        for link in soup.select('a[href*="mp.weixin.qq.com/"]'):
+            try:
+                url = wechat_url(urljoin(origin, link["href"]))
+            except ValueError:
+                continue
+            if url:
+                label = link.get("title") or link.get_text(" ", strip=True) or "校方链接的公众号文章"
+                referrals.setdefault(url, (origin, label))
+                if link.find(string=re.compile(r"^\s*官方微信\s*$")):
+                    biz = parse_qs(urlsplit(url).query).get("__biz", [""])[0]
+                    for name, directory_url in accounts.items():
+                        if biz and origin == directory_url:
+                            publishers[name] = dict(biz=biz, origin=origin)
+
     async def directory(url):
         found, recent, channels = [], [], []
         loaded = await page(url)
         if loaded:
             soup, final = loaded
+            collect_referrals(soup, final)
             checked_directories[final] = soup.title.get_text(" ", strip=True) if soup.title else urlsplit(final).netloc
             for link in soup.select("a[href]"):
                 try:
@@ -458,9 +552,14 @@ async def discover_benefits(domain, log):
         "学生 文体 领票 观演 场馆 免费", "就业服务 求职 咨询 住宿 困难补助",
     ]
     log(f"正在查找 {domain} 的近期活动、奖助、算力与校园服务")
-    searches, directories = await asyncio.gather(
-        asyncio.gather(*(query(words) for words in queries)),
+    school_name = next((name for name, (root, _) in SCHOOLS.items() if root == domain), "")
+    public_queries = [f"{school_name} {name if name != school_name else '师生'} 服务 申请 活动 权益"
+                      for name in accounts]
+    lookups = list(NOTICE_LOOKUPS.get(domain, ()))
+    searches, directories, public_searches = await asyncio.gather(
+        asyncio.gather(*(query(words) for words in lookups + queries)),
         asyncio.gather(*(directory(url) for url in roots)),
+        asyncio.gather(*(query(words, public=True) for words in lookups + public_queries)),
     )
     # Give each department a turn before following its next navigation link.
     channel_rounds = zip_longest(*(links for _, _, links in directories))
@@ -472,6 +571,7 @@ async def discover_benefits(domain, log):
     groups = [group for found, recent, _ in directories for group in (found, recent)]
     groups += list(searches) + [known]
     candidates = dict(guide_titles)
+    candidates.update(matching_lookups(lookups, searches))
     for row in zip_longest(*groups):
         for hit in row:
             if hit:
@@ -479,15 +579,51 @@ async def discover_benefits(domain, log):
                 candidates.setdefault(url, label)
     urls, next_url = candidate_batch(list(candidates), previous.get("next_candidate_url"))
     log(f"正在核对 {len(urls)} 个本校来源的正文")
+    campus_pages = await asyncio.gather(*(page(u) for u in urls))
+    for loaded in campus_pages:
+        if loaded:
+            soup, final = loaded
+            collect_referrals(soup, final)
+    social = matching_lookups(lookups, public_searches)
+    social.update({url: label for url, (_, label) in referrals.items()})
+    for group in public_searches:
+        for url, label in group:
+            social.setdefault(url, label)
+    for entry in entries.values():
+        if wechat_url(entry["url"]):
+            social.setdefault(entry["url"], entry["title"])
+    public_urls, next_public = candidate_batch(list(social), previous.get("next_public_url"), limit=8)
+    public_pages = await asyncio.gather(*(page(u) for u in public_urls))
+    # Authenticate search-only articles by an issuer ID observed on a campus-linked
+    # publication. Display-name matches and search snippets are only leads.
+    identities = {url: account_identity(loaded[0]) for url, loaded in zip(public_urls, public_pages) if loaded}
+    for url, (name, biz) in identities.items():
+        if url in referrals and name in accounts and biz:
+            publishers[name] = dict(biz=biz, origin=referrals[url][0])
     previous_ids = {e["fingerprint"]: e["id"] for e in entries.values() if e.get("fingerprint")}
     read = 0
     pending = []
-    for url, loaded in zip(urls, await asyncio.gather(*(page(u) for u in urls))):
+    candidates.update(social)
+    for url, loaded in zip(urls + public_urls, [*campus_pages, *public_pages]):
         if not loaded:
             pending.append(dict(title=candidates[url], url=url, reason="公开正文未读到"))
             continue
         soup, final = loaded
         read += 1
+        source_page = ""
+        direct = referrals.get(url)
+        if url in social:
+            old = entries.get(url, {})
+            name, biz = identities[url]
+            if direct:
+                source_page = direct[0]
+            elif old.get("campus_linked"):
+                source_page = old.get("source_page", "")
+            elif biz and publishers.get(name, {}).get("biz") == biz:
+                source_page = publishers[name]["origin"]
+            if not source_page:
+                pending.append(dict(title=social[url], url=url, reason="公众号发文账号与校方来源尚未对应"))
+                continue
         try:
             dates = listing_dates.get(url, set()) | listing_dates.get(final, set())
             listed_on = next(iter(dates)) if len(dates) == 1 else ""
@@ -500,6 +636,8 @@ async def discover_benefits(domain, log):
         entries.pop(url, None)
         entries.pop(final, None)
         if item:
+            if source_page:
+                item.update(source_page=source_page, campus_linked=bool(direct or (previous_entry or {}).get("campus_linked")))
             if previous_entry:
                 item["id"] = previous_entry["id"]
                 if not item["published_on"] and not dates and item["fingerprint"] == previous_entry.get("fingerprint"):
@@ -521,8 +659,10 @@ async def discover_benefits(domain, log):
     added = sum(item["id"] not in known_ids for item in items)
     store.put("benefit_feed", dict(id=domain, checked_at=checked_at, entries=items, failures=failures, pending=pending,
                                   pages_read=read, fresh=fresh, added=added, next_candidate_url=next_url,
+                                  public_publishers=publishers, next_public_url=next_public,
+                                  public_articles_read=len(identities),
                                   directories=[dict(url=u, title=t) for u, t in sorted(checked_directories.items())],
-                                  deferred=len(candidates) - len(urls)))
+                                  deferred=len(candidates) - len(urls) - len(public_urls)))
     log(f"已核对 {read} 个候选页面，核实 {fresh} 项福利，其中新增 {added} 项")
     return dict(domain=domain, fresh=fresh, added=added)
 
