@@ -130,6 +130,15 @@ def test_recent_unlabelled_notice_and_affiliated_domain_survive_refresh(monkeypa
     assert root in {d["url"] for d in feed["directories"]}
 
 
+def test_multi_section_service_guide_reads_the_admission_rules():
+    html = """<title>博物馆服务指南</title><body><div class="content">周二至周日开放</div>
+        <section><p>持本校有效校园卡的学生可免费入馆参观。</p></section>
+        <footer><div class="content">其他导航</div></footer></body>"""
+    card = benefits.read_benefit(BeautifulSoup(html, "html.parser"), "https://campus.edu.cn/guide",
+                                 guide_title="博物馆免费参观")
+    assert card["category"] == "文体活动" and "校园卡" in card["offer"]
+
+
 @pytest.mark.parametrize(("head", "body", "expected"), [
     ('<meta name="PubDate" content="2026-11-23 17:09">', "", "2026-11-23"),
     ("", "<p><span>发布日期：</span><span>2026年11月23日</span></p>", "2026-11-23"),

@@ -83,7 +83,7 @@ AUDIENCE = (r"(?:学院|书院).{0,24}级.{0,20}(?:本科生|研究生)\s*[:：]
             r"(?:资助(?=全日制|家庭|在校|本校|我校)|面向|服务对象为|资助对象为|申请对象为|凡)[^。]{0,55}(?:学生|本科|研究生|师生)",
             r"(?:申请对象|适用对象|服务对象|申请条件)[为：:].{4,}",
             r"在校|全日制|本科生|研究生|全校师生|本校师生|本校用户|我校师生|本校读者|校内读者|武大学生|校园卡|参赛(?:学生|团队)")
-METHOD = (r"登录|登陆|提交申请|填写.{0,15}申请|凭.{1,15}(?:领取|办理|预约)|扫描.{0,8}二维码",
+METHOD = (r"登录|登陆|提交申请|填写.{0,15}申请|凭.{1,15}(?:领取|办理|预约|入馆|入场)|扫描.{0,8}二维码",
           r"通过.{1,35}(?:申请|办理|领取|预约)|向.{1,24}(?:申请|提交)|申请入口|办理地点|领取地点|服务地点|携带.{1,40}(?:填写|办理|前往)|校园\s*(?:网\s*)?IP.{0,20}访问")
 TERMS = re.compile(r"服务年限|毕业后.{0,35}(?:就业|工作|服务)|违约.{0,20}(?:返还|退还|偿还)|"
                    r"(?:不得|不可|不能).{0,10}(?:兼得|兼报|重复申领|同时享受)|未享受.{0,25}其他.{0,12}助学金|"
@@ -289,7 +289,12 @@ def read_benefit(soup, url, *, guide_title="", listed_on=""):
     if not title:
         return None
     published_on = publication_date(soup) or listed_on
-    content = next((node for selector in LANDING_CONTENT if (node := soup.select_one(selector))), None)
+    selectors = LANDING_CONTENT
+    if guide_title and len(soup.select(".content", limit=2)) > 1:
+        # A multi-section service guide may use .content for a sidebar or
+        # opening hours. Read its main region or the whole guide in that case.
+        selectors = tuple(selector for selector in selectors if selector != ".content")
+    content = next((node for selector in selectors if (node := soup.select_one(selector))), None)
     content = content or soup.body
     if not content:
         return None
