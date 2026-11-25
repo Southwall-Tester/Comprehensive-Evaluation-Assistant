@@ -18,7 +18,15 @@ function benefitSchoolForm(domain, suggested) {
   return `<section class="card"><div class="rule-heading"><div><h2>当前学校官网</h2><b>${esc(domain)}</b></div>
     ${btn('立即查找','benefit-search','','primary')}</div>
     <p class="muted">${S.settings?.auto_research ? `本地服务运行时，自动检索间隔为 ${esc(S.settings.refresh_hours)} 小时。` : '自动检索已关闭，可以手动查找。'}</p>
-    ${domain === 'whu.edu.cn' ? '<p><a href="https://github.com/Southwall-Tester/Comprehensive-Evaluation-Assistant/blob/main/docs/whu-benefits-2026-11-25.md" target="_blank" rel="noopener noreferrer">武汉大学福利清单（2026 年 11 月 25 日） ↗</a></p>' : ''}
+    ${domain === 'whu.edu.cn' ? `<p><a href="https://github.com/Southwall-Tester/Comprehensive-Evaluation-Assistant/blob/main/docs/whu-benefits-2026-11-25.md" target="_blank" rel="noopener noreferrer">武汉大学福利清单（2026 年 11 月 25 日） ↗</a></p>
+      <p><a href="https://xzzgl.whu.edu.cn/" target="_blank" rel="noopener noreferrer">本科生困难补助申请</a> ·
+      <a href="https://xsjy.whu.edu.cn/a/common/student/consultingNew/consultingCalendar" target="_blank" rel="noopener noreferrer">就业指导预约</a> ·
+      <a href="https://museum.whu.edu.cn/fwzn.htm" target="_blank" rel="noopener noreferrer">万林艺术博物馆参观</a> ·
+      <a href="https://oldwww.lib.whu.edu.cn/webfile/category/ydcd_jh/1084.html" target="_blank" rel="noopener noreferrer">图书馆词典笔借还</a></p>
+      <details><summary>学生可领的校外 AI 额度</summary><ul class="list">
+      <li><a href="https://opc.aliyun.com/summer-2026" target="_blank" rel="noopener noreferrer">阿里云高校 AI 通行证</a>　完成高校学生认证后，可领取 300 元高校专享券并选择模型额度方案。</li>
+      ${guidanceToday() <= '2026-12-31' ? '<li><a href="https://cloud.tencent.com/document/product/1823/130053" target="_blank" rel="noopener noreferrer">腾讯云 TokenHub 新人体验包</a>　符合条件的主账号可在模型广场勾选语言模型，每个模型 100 万 Token，领取后有效 1 年。本期截至 2026 年 12 月 31 日。</li>' : ''}
+      </ul><small>2026 年 11 月 25 日核对，领取条件见发放方原文。</small></details>` : ''}
     <details><summary>更换学校官网</summary>${form}</details></section>`;
 }
 
@@ -77,6 +85,8 @@ function showBenefitFeed(feed, category, period, running) {
     <p class="muted">最近检索 ${esc(new Date(feed.checked_at).toLocaleString('zh-CN'))}，读取 ${esc(feed.pages_read)} 个候选页面，核实 ${esc(feed.fresh)} 项${Number.isInteger(feed.added) ? '，其中新增 ' + esc(feed.added) + ' 项' : ''}。${feed.deferred ? '另有 ' + esc(feed.deferred) + ' 个候选页面将在后续检索中轮流核对。' : ''}</p></div></div>
     ${categories.length ? `<div class="field-grid">${wfSelect('benefit-category','福利类别',[['','全部类别'], ...categories.map(c => [c,c])],category)}
       ${wfSelect('benefit-published','官网发布日期',[['','全部日期'],['7','近 7 天'],['30','近 30 天']],period)}</div>` : ''}
+    ${feed.directories?.length ? `<details><summary>本次读到的学校栏目（${feed.directories.length}）</summary><ul class="list benefit-issues">${feed.directories.map(d =>
+      `<li><a href="${safeUrl(d.url)}" target="_blank" rel="noopener noreferrer">${esc(d.title)}</a>　${esc(d.url)}</li>`).join('')}</ul></details>` : ''}
     ${feed.pending?.length ? `<details><summary>待核对公告（${feed.pending.length}）</summary><ul class="list benefit-issues">${feed.pending.map(p =>
       `<li><a href="${safeUrl(p.url)}" target="_blank" rel="noopener noreferrer">${esc(p.title)}</a>　${esc(p.reason)}</li>`).join('')}</ul></details>` : ''}
     ${feed.failures.length ? `<details><summary>${feed.failures.length} 处来源或检索未完成</summary><ul class="list benefit-issues">${feed.failures.map(f =>

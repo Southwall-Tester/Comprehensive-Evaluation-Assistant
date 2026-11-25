@@ -33,6 +33,15 @@ def test_deadline_requires_one_applicant_cutoff(lines, expected):
     assert benefits.application_deadline(lines)[0] == expected
 
 
+def test_personal_deadline_without_year_uses_same_month_official_date():
+    text = ["以上所有电子及纸质材料的提交截止时间为11月25下午17:00。"]
+    assert benefits.application_deadline(text, "2026-11-23") == ("2026-11-25", text)
+    assert not benefits.application_deadline(text, "2026-12-01")[0]
+    assert not benefits.application_deadline(text)[0]
+    both = ["申请截止日期为11月25日，本科生另行通知。"]
+    assert not benefits.application_deadline(both, "2026-11-23")[0]
+
+
 def test_school_resolution_uses_rule_source_and_keeps_organizers_separate():
     store.put("document", dict(id="rules", source_url="https://cs.alpha.edu.cn/rules.pdf"))
     policy = dict(id="a", name="计算机学院细则", official_domains=["host.beta.edu.cn", "org.example"])
@@ -64,6 +73,61 @@ def test_only_landing_page_evidence_becomes_an_offer():
     assert card["terms"] == ["本岗位不得与其他补贴同时享受。"]
     assert not card["deadline_text"] and not card["deadline"]
     assert "9999" not in str(card)
+
+
+@pytest.mark.parametrize(("statement", "expected"), [
+    ("每支参赛团队将获赠200万Tokens用于模型调用。", "AI 与算力"),
+    ("为报名学生提供免费设备借用。", "学习资源"),
+    ("本周为学生提供免费简历诊断。", "就业服务"),
+    ("在校学生预约后可领取演出门票。", "文体活动"),
+    ("全程自费，本次不提供模型调用额度。", ""),
+    ("请登录后领取身份验证令牌（token）并妥善保存。", ""),
+    ("课程介绍了模型如何将文字转换为token。", ""),
+    ("去年现场发放了200万Tokens。", ""),
+    ("培训会上还向同学们发放了 Token 服务使用额度。", ""),
+    ("报名后每位学生可领取1,000,000 Tokens。", "AI 与算力"),
+])
+def test_generic_activity_requires_an_explicit_student_entitlement(statement, expected):
+    html = f"<title>校园创作周报名</title><article><p>本次活动面向全校师生。</p><p>{statement}</p>" \
+           "<p>请登录校园活动平台报名参加。</p></article>"
+    card = benefits.read_benefit(BeautifulSoup(html, "html.parser"), "https://campus.edu.cn/notice")
+    assert (card["category"] if card else "") == expected
+    if card:
+        assert card["offer"] == statement
+
+
+def test_recent_unlabelled_notice_and_affiliated_domain_survive_refresh(monkeypatch):
+    root = "https://www.whuss.com/category/20"
+    article = "https://www.whuss.com/article/1"
+    today = date.today().isoformat()
+    pages = {root: f'<dt><span class="updated">[{today}]</span><a href="{article}">校园创作周日程安排</a></dt>'
+             f'<dt><span class="updated">[{today}]</span><a href="https://other.cn/article/2">校园服务活动</a></dt>',
+             article: '<title>校园创作周日程安排</title><article><p>本次活动面向全校师生。</p>'
+             '<p>每位参与者可领取模型调用额度。</p></article>'}
+    reads = []
+
+    async def fetch(url, *, limit, domains):
+        assert domains == ["whu.edu.cn", "www.whuss.com"]
+        reads.append(url)
+        html = pages.get(url, "")
+        return f"<body>{html}</body>".encode(), url, "text/html", {}
+
+    async def search(*args):
+        return []
+
+    monkeypatch.setattr(benefits, "fetch", fetch)
+    monkeypatch.setattr(benefits, "search", search)
+    monkeypatch.setattr(benefits, "SCHOOLS", {"武汉大学": ("whu.edu.cn", (root,))})
+    monkeypatch.setattr(benefits, "SERVICE_GUIDES", {})
+    for i in range(2):
+        asyncio.run(benefits.discover_benefits("whu.edu.cn", lambda _: None))
+        feed = store.get("benefit_feed", "whu.edu.cn")
+        assert feed["added"] == (1 if i == 0 else 0)
+        assert [(c["url"], c["published_on"], c["category"]) for c in feed["entries"]] == [
+            (article, today, "AI 与算力")]
+        pages[root] = "<p>今天已更新栏目。</p>"
+    assert reads.count(article) == 2 and "https://other.cn/article/2" not in reads
+    assert root in {d["url"] for d in feed["directories"]}
 
 
 @pytest.mark.parametrize(("head", "body", "expected"), [
