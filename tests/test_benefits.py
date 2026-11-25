@@ -66,6 +66,56 @@ def test_only_landing_page_evidence_becomes_an_offer():
     assert "9999" not in str(card)
 
 
+@pytest.mark.parametrize(("head", "body", "expected"), [
+    ('<meta name="PubDate" content="2026-11-23 17:09">', "", "2026-11-23"),
+    ("", "<p><span>发布日期：</span><span>2026年11月23日</span></p>", "2026-11-23"),
+    ('<meta property="article:modified_time" content="2026-11-25">', "", ""),
+    ('<meta name="PubDate" content="2026年2月31日">', "", ""),
+])
+def test_official_publication_date_is_independent_of_deadlines(head, body, expected):
+    soup = BeautifulSoup(f"<html><head>{head}</head><body>{body}"
+                         "<article>学生申请截止日期为2026年12月15日。</article></body></html>", "html.parser")
+    assert benefits.publication_date(soup) == expected
+
+
+@pytest.mark.parametrize(("offer", "accepted"), [
+    ("学生可同步申请外方奖学金10,000至25,000美元。", True),
+    ("项目不提供奖学金，学生自行承担全部费用。", False),
+    ("项目提供两门课程，学费为每人6000元。", False),
+    ("校内申请与外方申请均需在平台提交。", False),
+])
+def test_exchange_notice_requires_funding_evidence(offer, accepted):
+    html = f"""<meta name="ArticleTitle" content="关于选派本科生赴海外攻读硕士学位的通知">
+        <title>国际合作处</title><article><p>费用由学生自理，学费另缴。</p>
+        <p>{offer}</p><p>外方申请截止日期：202 6 年12月15日。</p></article>"""
+    result = benefits.read_benefit(BeautifulSoup(html, "html.parser"), "https://campus.edu.cn/project")
+    assert bool(result) == accepted
+    if accepted:
+        assert result["offer"] == offer and result["deadline"] == "2026-12-15"
+
+
+def test_trial_validity_and_institutional_reporting():
+    trial = BeautifulSoup("""<title>数据库开通试用</title><article><p>各位师生可登录校园平台访问数据库。</p>
+        <p>试用有效期</p><p>2026年11月—2027年11月</p></article>""", "html.parser")
+    card = benefits.read_benefit(trial, "https://campus.edu.cn/trial")
+    assert card["terms"] == ["试用有效期 2026年11月—2027年11月"]
+    aid = BeautifulSoup("""<title>寒衣补助申请</title><article><p>为在校家庭困难本科生免费发放冬衣。</p>
+        <p>三、各学院在11月20日之前将尺码统计表发送至学生中心。</p></article>""", "html.parser")
+    card = benefits.read_benefit(aid, "https://campus.edu.cn/winter")
+    assert "11月20日" in card["school_dates"][0] and not card["deadline"]
+
+
+def test_refreshes_cover_later_candidates_without_losing_leading_notices():
+    urls = [f"https://example.edu/item/{i}" for i in range(81)]
+    first, cursor = benefits.candidate_batch(urls, None)
+    second, cursor = benefits.candidate_batch(urls, cursor)
+    third, _ = benefits.candidate_batch(urls, cursor)
+    assert len(first) == len(set(second)) == len(third) == 48
+    assert first[:24] == second[:24] == third[:24] == urls[:24]
+    assert set(first + second + third) == set(urls)
+    assert benefits.candidate_batch(urls, "removed") == benefits.candidate_batch(urls, None)
+
+
 def test_discovery_crawls_without_search_and_retains_unread_sources(monkeypatch):
     domain = "campus.edu.cn"
     home = "https://campus.edu.cn/"
@@ -76,7 +126,7 @@ def test_discovery_crawls_without_search_and_retains_unread_sources(monkeypatch)
     pages = {
         home: '<a href="/aid/">学生资助</a>',
         "https://www.campus.edu.cn/": '<a href="https://another.edu.cn/b">助学金申请</a>',
-        directory: '<a href="notice">交通补贴申请</a><a href="notice#part">交通补贴</a>'
+        directory: '<a title="某大学" href="notice">交通补贴申请</a><a href="notice#part">交通补贴</a>'
                    '<a href="/unread">学生助理招聘</a><a href="/list">奖学金评选结果公示</a>',
         leaf: '<title>在校学生交通补贴申请</title><article><p>服务对象为全日制在校本科生。</p>'
               '<p>每人每月补贴100元。</p><p>请填写交通补贴申请表。</p></article>',
@@ -103,14 +153,17 @@ def test_discovery_crawls_without_search_and_retains_unread_sources(monkeypatch)
     assert all(q.startswith("site:campus.edu.cn ") for q in queries)
     assert set(read_urls) == {home, "https://www.campus.edu.cn/", directory, leaf, failed}
     assert read_urls.count(leaf) == 1
-    assert feed["fresh"] == feed["pages_read"] == 1
+    assert feed["fresh"] == feed["pages_read"] == feed["added"] == 1
     assert feed["entries"][0]["offer"] == "每人每月补贴100元。"
     assert feed["pending"][0]["url"] == failed
     assert len(feed["failures"]) == 2
+    asyncio.run(benefits.discover_benefits(domain, lambda _: None))
+    rechecked = store.get("benefit_feed", domain)
+    assert rechecked["fresh"] == 1 and rechecked["added"] == 0
     del pages[leaf]
     asyncio.run(benefits.discover_benefits(domain, lambda _: None))
     retry = store.get("benefit_feed", domain)
-    assert retry["fresh"] == 0 and retry["entries"] == feed["entries"]
+    assert retry["fresh"] == 0 and retry["entries"] == rechecked["entries"]
     assert retry["checked_at"] != retry["entries"][0]["checked_at"]
 
     async def no_hits(*args):

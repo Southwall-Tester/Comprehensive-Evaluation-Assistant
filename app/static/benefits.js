@@ -18,11 +18,13 @@ function benefitSchoolForm(domain, suggested) {
   return `<section class="card"><div class="rule-heading"><div><h2>当前学校官网</h2><b>${esc(domain)}</b></div>
     ${btn('立即查找','benefit-search','','primary')}</div>
     <p class="muted">${S.settings?.auto_research ? `本地服务运行时，自动检索间隔为 ${esc(S.settings.refresh_hours)} 小时。` : '自动检索已关闭，可以手动查找。'}</p>
+    ${domain === 'whu.edu.cn' ? '<p><a href="https://github.com/Southwall-Tester/Comprehensive-Evaluation-Assistant/blob/main/docs/whu-benefits-2026-11-25.md" target="_blank" rel="noopener noreferrer">武汉大学福利清单（2026 年 11 月 25 日） ↗</a></p>' : ''}
     <details><summary>更换学校官网</summary>${form}</details></section>`;
 }
 
 function benefitCard(item, feed) {
   const facts = [
+    ['官网发布日期', item.published_on || '日期待核对'],
     ['适用对象', item.audience && item.audience === item.offer ? '' : item.audience || '适用范围请核对官网原文。'],
     ['办理方式', item.method && (item.method === item.offer || item.method === item.audience) ? '' : item.method || '办理步骤请核对官网原文。'],
     ['使用或履约条件', (item.terms || []).filter(s => ![item.offer,item.audience,item.method].includes(s)).join(' ')],
@@ -49,21 +51,32 @@ function showBenefitCards() {
   if (!target || !benefitData?.feed) return;
   const feed = benefitData.feed, category = $('#benefit-category')?.value || '';
   const today = guidanceToday();
-  const items = feed.entries.filter(i => !category || i.category === category).sort((a,b) =>
+  const days = Number($('#benefit-published')?.value || 0);
+  const firstDay = new Date(today + 'T00:00:00Z');
+  firstDay.setUTCDate(firstDay.getUTCDate() - days + 1);
+  const since = firstDay.toISOString().slice(0,10);
+  const items = feed.entries.filter(i => (!category || i.category === category) &&
+    (!days || (i.published_on >= since && i.published_on <= today))).sort((a,b) =>
+    (b.published_on || '').localeCompare(a.published_on || '') ||
     Number(b.checked_at === feed.checked_at) - Number(a.checked_at === feed.checked_at) ||
     (a.deadline || '9999').localeCompare(b.deadline || '9999') || a.title.localeCompare(b.title,'zh-CN'));
   const old = items.filter(i => i.deadline && i.deadline < today);
   const cards = rows => `<div class="opportunity-grid benefit-grid">${rows.map(i => benefitCard(i,feed)).join('')}</div>`;
+  if (!items.length) {
+    target.innerHTML = feed.entries.length ? '<p class="notice">当前筛选条件下没有公告。</p>' : '';
+    return;
+  }
   target.innerHTML = cards(items.filter(i => !i.deadline || i.deadline >= today)) +
     (old.length ? `<details class="card section-gap"><summary>已过原文截止日（${old.length}）</summary>${cards(old)}</details>` : '');
 }
 
-function showBenefitFeed(feed, category, running) {
+function showBenefitFeed(feed, category, period, running) {
   if (!feed) return `<p class="notice" role="status">${running ? '正在检索并核对学校官网，完成后会在这里显示。' : '尚未查找过这所学校的福利。'}</p>`;
   const categories = [...new Set(feed.entries.map(i => i.category))];
   return `<section class="card section-gap"><div class="rule-heading"><div><h2>检索结果</h2>
-    <p class="muted">最近检索 ${esc(new Date(feed.checked_at).toLocaleString('zh-CN'))}，读取 ${esc(feed.pages_read)} 个候选页面，本次收录 ${esc(feed.fresh)} 项。</p></div>
-    ${categories.length ? wfSelect('benefit-category','福利类别',[['','全部类别'], ...categories.map(c => [c,c])],category) : ''}</div>
+    <p class="muted">最近检索 ${esc(new Date(feed.checked_at).toLocaleString('zh-CN'))}，读取 ${esc(feed.pages_read)} 个候选页面，核实 ${esc(feed.fresh)} 项${Number.isInteger(feed.added) ? '，其中新增 ' + esc(feed.added) + ' 项' : ''}。${feed.deferred ? '另有 ' + esc(feed.deferred) + ' 个候选页面将在后续检索中轮流核对。' : ''}</p></div></div>
+    ${categories.length ? `<div class="field-grid">${wfSelect('benefit-category','福利类别',[['','全部类别'], ...categories.map(c => [c,c])],category)}
+      ${wfSelect('benefit-published','官网发布日期',[['','全部日期'],['7','近 7 天'],['30','近 30 天']],period)}</div>` : ''}
     ${feed.pending?.length ? `<details><summary>待核对公告（${feed.pending.length}）</summary><ul class="list benefit-issues">${feed.pending.map(p =>
       `<li><a href="${safeUrl(p.url)}" target="_blank" rel="noopener noreferrer">${esc(p.title)}</a>　${esc(p.reason)}</li>`).join('')}</ul></details>` : ''}
     ${feed.failures.length ? `<details><summary>${feed.failures.length} 处来源或检索未完成</summary><ul class="list benefit-issues">${feed.failures.map(f =>
@@ -92,7 +105,8 @@ async function refreshBenefits() {
     }
     const revision = JSON.stringify([data.feed?.updated_at, data.feed ? null : data.running]);
     if (data.domain && panel.dataset.revision !== revision) {
-      $('#benefit-feed').innerHTML = showBenefitFeed(data.feed, $('#benefit-category')?.value, data.running);
+      $('#benefit-feed').innerHTML = showBenefitFeed(data.feed, $('#benefit-category')?.value,
+        $('#benefit-published')?.value, data.running);
       panel.dataset.revision = revision;
       showBenefitCards();
     }
@@ -132,5 +146,7 @@ document.addEventListener('submit', async event => {
   } catch (error) { notify(error.message); }
   finally { button.disabled = false; }
 });
-document.addEventListener('change', event => { if (event.target.id === 'benefit-category') showBenefitCards(); });
+document.addEventListener('change', event => {
+  if (['benefit-category', 'benefit-published'].includes(event.target.id)) showBenefitCards();
+});
 setInterval(() => { if (page === 'benefits' && !document.hidden) refreshBenefits(); }, 10000);

@@ -52,11 +52,11 @@ def fixtures(folder):
     checked = today.isoformat() + 'T08:00:00+00:00'
     grant = dict(id='grant', title='虚构交通补贴', url='https://example.edu/aid', category='奖助与补贴',
                  audience='面向在校学生。', offer='每月可申请交通补贴。', method='登录学生服务平台提交材料。',
-                 deadline=day(3), deadline_text=['申请截止日期为' + day(3)], checked_at=checked)
+                 deadline=day(3), deadline_text=['申请截止日期为' + day(3)], published_on=day(-6), checked_at=checked)
     resource = dict(grant, id='tool', title='虚构软件服务', category='学习资源', url='https://example.edu/tools',
-                    offer='本校师生可免费使用教学软件。', deadline='', deadline_text=[])
+                    offer='本校师生可免费使用教学软件。', deadline='', deadline_text=[], published_on=day(-7))
     feed = dict(id='example.edu', checked_at=checked, updated_at=checked, entries=[grant, resource],
-                fresh=2, pages_read=2, pending=[], failures=[])
+                fresh=2, added=1, pages_read=2, pending=[], failures=[])
     with sqlite3.connect(folder/'workspace.sqlite') as c:
         c.execute('CREATE TABLE objects(kind TEXT,id TEXT,body TEXT,PRIMARY KEY(kind,id))')
         put(c, 'benefit_feed', feed)
@@ -187,8 +187,15 @@ def check_browser(base):
         card = page.locator('[data-benefit-id="grant"]')
         expect(card).to_contain_text('登录学生服务平台提交材料')
         expect(card.get_by_role('link')).to_have_attribute('href', 'https://example.edu/aid')
+        expect(page.locator('#benefit-feed')).to_contain_text('其中新增 1 项')
+        expect(page.locator('[data-benefit-id]').first).to_have_attribute('data-benefit-id', 'grant')
+        page.locator('#benefit-published').select_option('7')
+        expect(card).to_be_visible()
+        expect(page.locator('[data-benefit-id="tool"]')).to_have_count(0)
         page.locator('#benefit-category').select_option('学习资源')
         expect(card).to_have_count(0)
+        expect(page.locator('#benefit-cards')).to_contain_text('当前筛选条件下没有公告')
+        page.locator('#benefit-published').select_option('30')
         expect(page.locator('[data-benefit-id="tool"]')).to_be_visible()
         page.locator('#benefit-category').select_option('奖助与补贴')
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
